@@ -34,13 +34,17 @@ esbuild.build({
   outfile: path.join(distDir, 'index.js'), // Ensure outfile path is absolute or relative to cwd
   loader: { '.tsx': 'tsx' },
   format: 'esm',
+  // Explicitly set JSX factory to 'automatic'
+  jsx: 'automatic',
+  // Target modern browsers
+  target: 'esnext',
   // Define process.env.API_KEY for substitution during the build
   // Fallback to empty string if not set, for local development robustness
   define: {
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || ''),
   },
   // Mark these imports as external, relying on the importmap in index.html
-  external: ['react', 'react-dom/client', '@google/genai', 'react/jsx-runtime'],
+  external: ['react', 'react-dom', 'react-dom/client', '@google/genai', 'react/jsx-runtime'],
   minify: true, // Minify the output JavaScript
   sourcemap: true, // Generate sourcemaps for easier debugging
   logLevel: 'info',
