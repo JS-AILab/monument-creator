@@ -16,10 +16,22 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen flex items-center justify-center p-4">
     <div id="root" class="w-full"></div>
+    <script>
+      // Shim process.env for client-side execution without a build step
+      // This allows Vercel to inject API_KEY via environment variables.
+      if (typeof process === 'undefined') {
+        window.process = { env: {} };
+      }
+      // Vercel or similar platforms can replace 'VITE_APP_API_KEY_PLACEHOLDER'
+      // with the actual environment variable set in their dashboard.
+      // Ensure your Vercel environment variable is named 'API_KEY'.
+      if (!window.process.env.API_KEY) {
+        window.process.env.API_KEY = "VITE_APP_API_KEY_PLACEHOLDER";
+      }
+    </script>
     <script type="module" src="/index.tsx"></script>
 </body>
 </html>
