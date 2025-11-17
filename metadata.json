@@ -1,0 +1,5 @@
+{
+  "name": "AI Monument Creator",
+  "description": "Generate realistic images of AI-created monuments seamlessly integrated into various scenes using Gemini Flash Image.",
+  "requestFramePermissions": []
+}
