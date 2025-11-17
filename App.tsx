@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { generateMonumentImage } from './services/geminiService';
 import { APIStatus } from './types';
+import { GoogleGenAI } from "@google/genai"; // Import GoogleGenAI to fix a reference error in handleGenerate if it was previously used there.
 
 function App(): React.JSX.Element {
   const [monumentPrompt, setMonumentPrompt] = useState<string>('');
@@ -12,6 +13,12 @@ function App(): React.JSX.Element {
   const handleGenerate = useCallback(async () => {
     setError(null);
     setGeneratedImageUrl(null);
+
+    // No need to check for apiKeySelected or prompt the user as it's assumed to be set via process.env.API_KEY.
+    // The GoogleGenAI instance is already created within generateMonumentImage to ensure it uses the latest API_KEY.
+    // So, this local 'ai' variable is not necessary here.
+    // const ai = new GoogleGenAI({ apiKey: process.env.API_KEY }); 
+
     if (!monumentPrompt || !scenePrompt) {
       setError('Please enter both monument and scene descriptions.');
       return;
@@ -24,29 +31,53 @@ function App(): React.JSX.Element {
       setApiStatus(APIStatus.SUCCESS);
     } catch (err: unknown) {
       console.error('Failed to generate image:', err);
-      setError(`Failed to generate image: ${err instanceof Error ? err.message : String(err)}`);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      // Removed specific error handling for "Requested entity was not found." as API key is environment-managed.
+      setError(`Failed to generate image: ${errorMessage}`);
       setApiStatus(APIStatus.ERROR);
     }
   }, [monumentPrompt, scenePrompt]);
 
+  // handleShare function for sharing the generated image
   const handleShare = useCallback(async () => {
     if (generatedImageUrl && navigator.share) {
       try {
+        // Fetch the image data to create a Blob for sharing
+        const response = await fetch(generatedImageUrl);
+        const blob = await response.blob();
+        const file = new File([blob], 'ai-monument.png', { type: blob.type });
+
         await navigator.share({
-          title: 'AI Monument Creator',
-          text: 'Check out this amazing monument image I created with the AI Monument Creator!',
-          // Note: Directly sharing data URLs as files via navigator.share is not universally supported.
-          // For a true image share, the image would need to be hosted or converted to a Blob with a proper filename.
-          // As a fallback, we share text about the creation.
+          files: [file],
+          title: 'AI Monument',
+          text: 'Check out this AI-generated monument!',
         });
+        console.log('Image shared successfully');
       } catch (err) {
-        console.error('Error sharing:', err);
-        setError('Failed to share. Your browser might not support sharing this content, or you cancelled the share operation.');
+        console.error('Error sharing image:', err);
+        setError('Failed to share image. Your browser might have restrictions or you cancelled the share.');
       }
-    } else if (!navigator.share) {
+    } else if (generatedImageUrl && !navigator.share) {
       setError('Web Share API is not supported in your browser.');
+    } else {
+      setError('No image available to share.');
     }
   }, [generatedImageUrl]);
+
+  // Helper function to render HTML from a string (for error messages with links)
+  const renderError = (message: string | null) => {
+    if (!message) return null;
+    return (
+      <div
+        className="bg-[#fee2e2] border border-[#fca5a5] text-[#dc2626] px-4 py-3 rounded-md relative"
+        role="alert"
+      >
+        <strong className="font-bold">Error: </strong>
+        <span className="block sm:inline" dangerouslySetInnerHTML={{ __html: message }}></span>
+      </div>
+    );
+  };
+
 
   return (
     <div className="container mx-auto p-4 md:p-8 max-w-4xl bg-white rounded-xl shadow-2xl border border-blue-100">
@@ -55,6 +86,8 @@ function App(): React.JSX.Element {
       </h1>
 
       <div className="space-y-6 mb-8">
+        {renderError(error)} {/* Use renderError helper for displaying messages */}
+
         <div>
           <label htmlFor="monumentPrompt" className="block text-lg font-semibold text-gray-700 mb-2">
             1. Describe the Monument (e.g., "a majestic lion", "a brave astronaut"):
@@ -67,6 +100,7 @@ function App(): React.JSX.Element {
             onChange={(e) => setMonumentPrompt(e.target.value)}
             placeholder="e.g., 'a towering statue of a futuristic cyborg on a pedestal'"
             aria-label="Monument description prompt"
+            disabled={apiStatus === APIStatus.LOADING}
           ></textarea>
         </div>
 
@@ -82,15 +116,9 @@ function App(): React.JSX.Element {
             onChange={(e) => setScenePrompt(e.target.value)}
             placeholder="e.g., 'a peaceful Japanese garden with cherry blossom trees and a koi pond'"
             aria-label="Scene description prompt"
+            disabled={apiStatus === APIStatus.LOADING}
           ></textarea>
         </div>
-
-        {error && (
-          <div className="bg-[#fee2e2] border border-[#fca5a5] text-[#dc2626] px-4 py-3 rounded-md relative" role="alert">
-            <strong className="font-bold">Error: </strong>
-            <span className="block sm:inline">{error}</span>
-          </div>
-        )}
 
         <button
           onClick={handleGenerate}
@@ -142,7 +170,7 @@ function App(): React.JSX.Element {
             </a>
             <button
               onClick={handleShare}
-              disabled={!navigator.share}
+              disabled={!navigator.share || apiStatus === APIStatus.LOADING} // Disable share button if loading
               className="py-2 px-4 bg-[#EA4335] text-white font-bold rounded-lg shadow-md hover:bg-[#c23321] focus:outline-none focus:ring-4 focus:ring-[#FF8A8A] transition-all duration-300 flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Share generated image"
             >
