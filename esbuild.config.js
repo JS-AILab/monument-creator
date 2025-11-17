@@ -40,7 +40,7 @@ esbuild.build({
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || ''),
   },
   // Mark these imports as external, relying on the importmap in index.html
-  external: ['react', 'react-dom/client', '@google/genai'],
+  external: ['react', 'react-dom/client', '@google/genai', 'react/jsx-runtime'],
   minify: true, // Minify the output JavaScript
   sourcemap: true, // Generate sourcemaps for easier debugging
   logLevel: 'info',
