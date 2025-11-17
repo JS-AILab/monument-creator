@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { generateMonumentImage } from './services/geminiService';
 import { APIStatus } from './types';
-import { GoogleGenAI } from "@google/genai"; // Import GoogleGenAI to fix a reference error in handleGenerate if it was previously used there.
+import { GoogleGenAI } from "@google/genai";
 
 function App(): React.JSX.Element {
   const [monumentPrompt, setMonumentPrompt] = useState<string>('');
@@ -9,15 +9,44 @@ function App(): React.JSX.Element {
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<APIStatus>(APIStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
+  const [apiKeySelected, setApiKeySelected] = useState<boolean>(false);
+
+  useEffect(() => {
+    const checkApiKey = async () => {
+      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setApiKeySelected(hasKey);
+      } else {
+        // If window.aistudio is not available, assume API_KEY must be set in env directly
+        // This fallback might not be fully compliant with how the SDK is intended to be used
+        // in AI Studio without the aistudio object.
+        console.warn("window.aistudio object not found. Assuming API_KEY is managed externally.");
+        setApiKeySelected(!!process.env.API_KEY); // Optimistically assume if process.env.API_KEY exists
+      }
+    };
+    checkApiKey();
+  }, []);
+
+  const handleSelectApiKey = useCallback(async () => {
+    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+      await window.aistudio.openSelectKey();
+      // Assume success after opening the dialog due to race condition possibility
+      setApiKeySelected(true);
+      setError(null); // Clear any previous API key related errors
+    } else {
+      setError("AI Studio API key selection mechanism not available.");
+    }
+  }, []);
+
 
   const handleGenerate = useCallback(async () => {
     setError(null);
     setGeneratedImageUrl(null);
 
-    // No need to check for apiKeySelected or prompt the user as it's assumed to be set via process.env.API_KEY.
-    // The GoogleGenAI instance is already created within generateMonumentImage to ensure it uses the latest API_KEY.
-    // So, this local 'ai' variable is not necessary here.
-    // const ai = new GoogleGenAI({ apiKey: process.env.API_KEY }); 
+    if (!apiKeySelected) {
+      setError('Please select an API Key before generating an image. <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" class="font-medium text-[#1a73e8] hover:text-[#0c4eaf] underline">Billing information.</a>');
+      return;
+    }
 
     if (!monumentPrompt || !scenePrompt) {
       setError('Please enter both monument and scene descriptions.');
@@ -32,11 +61,15 @@ function App(): React.JSX.Element {
     } catch (err: unknown) {
       console.error('Failed to generate image:', err);
       const errorMessage = err instanceof Error ? err.message : String(err);
-      // Removed specific error handling for "Requested entity was not found." as API key is environment-managed.
-      setError(`Failed to generate image: ${errorMessage}`);
+      if (errorMessage.includes("Requested entity was not found.")) {
+        setError('Failed to generate image: API Key might be invalid or not properly configured. Please re-select your API Key. <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" class="font-medium text-[#1a73e8] hover:text-[#0c4eaf] underline">Billing information.</a>');
+        setApiKeySelected(false); // Reset key selection state
+      } else {
+        setError(`Failed to generate image: ${errorMessage}`);
+      }
       setApiStatus(APIStatus.ERROR);
     }
-  }, [monumentPrompt, scenePrompt]);
+  }, [monumentPrompt, scenePrompt, apiKeySelected]);
 
   // handleShare function for sharing the generated image
   const handleShare = useCallback(async () => {
@@ -88,6 +121,24 @@ function App(): React.JSX.Element {
       <div className="space-y-6 mb-8">
         {renderError(error)} {/* Use renderError helper for displaying messages */}
 
+        {!apiKeySelected && (
+          <div className="bg-[#fff3e0] border border-[#ffc107] text-[#e65100] px-4 py-3 rounded-md mb-6 text-center" role="alert">
+            <p className="font-semibold mb-2">API Key Not Selected</p>
+            <p className="mb-4">Please select your Google Gemini API Key to use this application.</p>
+            <button
+              onClick={handleSelectApiKey}
+              className="py-2 px-6 bg-[#f7b000] text-white font-bold rounded-lg shadow-md hover:bg-[#e0a000] focus:outline-none focus:ring-4 focus:ring-[#ffd54f] transition-all duration-300 transform active:scale-98"
+            >
+              Select API Key
+            </button>
+            <p className="text-sm mt-3">
+              <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="font-medium text-[#e65100] hover:text-[#bf360c] underline">
+                Billing information
+              </a> is required for API usage.
+            </p>
+          </div>
+        )}
+
         <div>
           <label htmlFor="monumentPrompt" className="block text-lg font-semibold text-gray-700 mb-2">
             1. Describe the Monument (e.g., "a majestic lion", "a brave astronaut"):
@@ -100,7 +151,7 @@ function App(): React.JSX.Element {
             onChange={(e) => setMonumentPrompt(e.target.value)}
             placeholder="e.g., 'a towering statue of a futuristic cyborg on a pedestal'"
             aria-label="Monument description prompt"
-            disabled={apiStatus === APIStatus.LOADING}
+            disabled={apiStatus === APIStatus.LOADING || !apiKeySelected}
           ></textarea>
         </div>
 
@@ -116,13 +167,13 @@ function App(): React.JSX.Element {
             onChange={(e) => setScenePrompt(e.target.value)}
             placeholder="e.g., 'a peaceful Japanese garden with cherry blossom trees and a koi pond'"
             aria-label="Scene description prompt"
-            disabled={apiStatus === APIStatus.LOADING}
+            disabled={apiStatus === APIStatus.LOADING || !apiKeySelected}
           ></textarea>
         </div>
 
         <button
           onClick={handleGenerate}
-          disabled={apiStatus === APIStatus.LOADING}
+          disabled={apiStatus === APIStatus.LOADING || !apiKeySelected}
           className="w-full py-3 px-6 bg-[#4285F4] text-white font-bold rounded-lg shadow-lg hover:bg-[#346dc9] focus:outline-none focus:ring-4 focus:ring-[#a0c3ff] transition-all duration-300 transform active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
         >
           {apiStatus === APIStatus.LOADING ? (
@@ -175,7 +226,7 @@ function App(): React.JSX.Element {
               aria-label="Share generated image"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.832-1.664l-4.94-2.47a3.027 3.027 0 000-.629l4.94-2.47C13.856 7.638 14.123 8 15 8z" />
+                <path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.832-1.664l-4.94-2.47a3.027 3 0 000-.629l4.94-2.47C13.856 7.638 14.123 8 15 8z" />
               </svg>
               Share
             </button>
