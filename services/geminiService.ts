@@ -4,35 +4,6 @@ import { GenerateImageResponse } from "../types";
 const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 /**
- * Encodes a Uint8Array to a base64 string.
- * @param bytes The Uint8Array to encode.
- * @returns The base64 encoded string.
- */
-function encode(bytes: Uint8Array): string {
-  let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-/**
- * Decodes a base64 string to a Uint8Array.
- * @param base64 The base64 string to decode.
- * @returns The decoded Uint8Array.
- */
-function decode(base64: string): Uint8Array {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-/**
  * Generates a monument image by combining two prompts using the Gemini API.
  * The monument is intelligently placed, grounded, and realistically sized within the scene.
  *
@@ -45,6 +16,16 @@ export async function generateMonumentImage(
   monumentPrompt: string,
   scenePrompt: string
 ): Promise<GenerateImageResponse> {
+  // We assume process.env.API_KEY is available either through a build step
+  // or a shim in index.html for client-side environments.
+  if (!process.env.API_KEY || process.env.API_KEY === "VITE_APP_API_KEY_PLACEHOLDER") {
+    throw new Error(
+      "Google Gemini API Key is not configured. Please ensure your 'API_KEY' " +
+      "environment variable is set correctly in your deployment environment (e.g., Vercel)."
+    );
+  }
+
+  // Always initialize GoogleGenAI here to ensure the latest API_KEY is used.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // Construct the composite prompt based on user requirements.
@@ -64,7 +45,6 @@ export async function generateMonumentImage(
     const imageDataPart = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
 
     if (imageDataPart && imageDataPart.data && imageDataPart.mimeType) {
-      // Decode the base64 string provided by the API if needed, though typically it's already base64 for inlineData.
       // The API returns image data directly as base64 in inlineData.data
       const base64ImageBytes: string = imageDataPart.data;
       const mimeType: string = imageDataPart.mimeType;
