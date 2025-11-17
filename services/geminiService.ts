@@ -16,9 +16,9 @@ export async function generateMonumentImage(
   monumentPrompt: string,
   scenePrompt: string
 ): Promise<GenerateImageResponse> {
-  // We assume process.env.API_KEY is available either through a build step
-  // or a shim in index.html for client-side environments.
-  if (!process.env.API_KEY || process.env.API_KEY === "VITE_APP_API_KEY_PLACEHOLDER") {
+  const apiKey = process.env.API_KEY;
+
+  if (!apiKey) {
     throw new Error(
       "Google Gemini API Key is not configured. Please ensure your 'API_KEY' " +
       "environment variable is set correctly in your deployment environment (e.g., Vercel)."
@@ -26,7 +26,7 @@ export async function generateMonumentImage(
   }
 
   // Always initialize GoogleGenAI here to ensure the latest API_KEY is used.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: apiKey });
 
   // Construct the composite prompt based on user requirements.
   const compositePrompt = `Create a photorealistic image where "${monumentPrompt}" is designed as a monument and seamlessly placed in "${scenePrompt}". The monument must be intelligently positioned as a focal point, firmly grounded, and realistically sized relative to its surroundings. Ensure lighting, shadows, and perspective perfectly match the scene, making it indistinguishable from a real photograph.`;
