@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { generateMonumentImage } from './services/geminiService';
 import { APIStatus } from './types';
+import { saveCreation, getCreations, Creation } from './services/apiService'; // Import new API service
 
 function App(): React.JSX.Element {
   const [monumentPrompt, setMonumentPrompt] = useState<string>('');
@@ -8,6 +9,30 @@ function App(): React.JSX.Element {
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<APIStatus>(APIStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
+
+  // New states for database interaction
+  const [savedCreations, setSavedCreations] = useState<Creation[]>([]);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  // Effect to load history on component mount
+  useEffect(() => {
+    const fetchHistory = async () => {
+      setLoadingHistory(true);
+      setHistoryError(null);
+      try {
+        const history = await getCreations();
+        setSavedCreations(history);
+      } catch (err) {
+        console.error('Failed to load creation history:', err);
+        setHistoryError(`Failed to load history: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+    fetchHistory();
+  }, []); // Run only once on mount
 
   const handleGenerate = useCallback(async () => {
     setError(null);
@@ -21,13 +46,31 @@ function App(): React.JSX.Element {
     setApiStatus(APIStatus.LOADING);
     try {
       const response = await generateMonumentImage(monumentPrompt, scenePrompt);
-      setGeneratedImageUrl(`data:${response.mimeType};base64,${response.base64ImageData}`);
+      const newImageUrl = `data:${response.mimeType};base64,${response.base64ImageData}`;
+      setGeneratedImageUrl(newImageUrl);
       setApiStatus(APIStatus.SUCCESS);
+
+      // Attempt to save the new creation to the database
+      setIsSaving(true);
+      setHistoryError(null); // Clear previous history errors
+      try {
+        const saved = await saveCreation({
+          monumentPrompt,
+          scenePrompt,
+          imageUrl: newImageUrl,
+        });
+        setSavedCreations((prev) => [saved, ...prev]); // Add new creation to the top of the history
+      } catch (saveErr) {
+        console.error('Failed to save creation to database:', saveErr);
+        setHistoryError(`Failed to save this creation to history: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`);
+      } finally {
+        setIsSaving(false);
+      }
+
     } catch (err: unknown) {
       console.error('Failed to generate image:', err);
       const errorMessage = err instanceof Error ? err.message : String(err);
-      // Display the error directly from the service, which now provides more detail
-      setError(`${errorMessage}`); // Error message now includes API key configuration guidance
+      setError(`${errorMessage}`);
       setApiStatus(APIStatus.ERROR);
     }
   }, [monumentPrompt, scenePrompt]);
@@ -179,8 +222,74 @@ function App(): React.JSX.Element {
               (Sharing is not supported in this browser.)
             </p>
           )}
+          {isSaving && (
+            <div className="mt-4 flex items-center justify-center text-gray-600">
+              <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Saving to history...
+            </div>
+          )}
         </div>
       )}
+
+      {/* Creation History Section */}
+      <div className="mt-12 pt-8 border-t-2 border-blue-300">
+        <h2 className="text-2xl md:text-3xl font-bold text-center text-[#1a73e8] mb-6">
+          Creation History
+        </h2>
+        {renderError(historyError)} {/* Display history-specific errors */}
+
+        {loadingHistory ? (
+          <div className="flex items-center justify-center text-gray-600">
+            <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Loading history...
+          </div>
+        ) : savedCreations.length === 0 ? (
+          <p className="text-center text-gray-500 text-lg">No past creations yet. Generate one above!</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {savedCreations.map((creation) => (
+              <div key={creation.id} className="bg-white border border-gray-200 rounded-lg shadow-md p-4 flex flex-col items-center text-center">
+                <p className="text-sm text-gray-500 mb-2">
+                  {new Date(creation.created_at).toLocaleString()}
+                </p>
+                <p className="font-semibold text-gray-800 mb-2 break-words">
+                  "{creation.monument_prompt}" in "{creation.scene_prompt}"
+                </p>
+                <a
+                  href={creation.image_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block mt-2 w-full max-w-[200px] h-auto overflow-hidden rounded-md border border-gray-300 hover:border-[#4285F4] transition-all duration-200"
+                  aria-label={`View image for monument: ${creation.monument_prompt}`}
+                >
+                  <img
+                    src={creation.image_url}
+                    alt={`${creation.monument_prompt} in ${creation.scene_prompt}`}
+                    className="w-full h-auto object-cover"
+                    style={{ aspectRatio: '1 / 1' }} // Maintain aspect ratio for thumbnails
+                  />
+                </a>
+                <a
+                  href={creation.image_url}
+                  download={`ai-monument-${creation.id}.png`}
+                  className="mt-4 py-1 px-3 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600 transition-colors duration-200 flex items-center"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 11.586V4a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                  Download
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

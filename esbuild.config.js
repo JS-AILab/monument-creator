@@ -2,27 +2,27 @@ const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
 
-const distDir = path.join(__dirname, 'dist');
+const outputDir = path.join(__dirname, 'public'); // Changed from 'dist' to 'public'
 
 console.log('Starting build process...');
 
-// Create dist directory if it doesn't exist
-if (!fs.existsSync(distDir)) {
-  fs.mkdirSync(distDir, { recursive: true }); // Ensure recursive flag for nested paths
-  console.log(`Created dist directory: ${distDir}`);
+// Create output directory if it doesn't exist
+if (!fs.existsSync(outputDir)) {
+  fs.mkdirSync(outputDir, { recursive: true }); // Ensure recursive flag for nested paths
+  console.log(`Created output directory: ${outputDir}`);
 } else {
-  console.log(`Dist directory already exists: ${distDir}`);
+  console.log(`Output directory already exists: ${outputDir}`);
 }
 
-// Copy metadata.json to dist
+// Copy metadata.json to public
 const metadataSrc = path.join(__dirname, 'metadata.json');
-const metadataDest = path.join(distDir, 'metadata.json');
+const metadataDest = path.join(outputDir, 'metadata.json');
 fs.copyFileSync(metadataSrc, metadataDest);
 console.log(`Copied ${metadataSrc} to ${metadataDest}`);
 
-// Copy index.html to dist (assuming it's already updated to point to index.js)
+// Copy index.html to public
 const htmlSrc = path.join(__dirname, 'index.html');
-const htmlDest = path.join(distDir, 'index.html');
+const htmlDest = path.join(outputDir, 'index.html');
 fs.copyFileSync(htmlSrc, htmlDest);
 console.log(`Copied ${htmlSrc} to ${htmlDest}`);
 
@@ -31,7 +31,7 @@ console.log(`Copied ${htmlSrc} to ${htmlDest}`);
 esbuild.build({
   entryPoints: ['index.tsx'],
   bundle: true,
-  outfile: path.join(distDir, 'index.js'), // Ensure outfile path is absolute or relative to cwd
+  outfile: path.join(outputDir, 'index.js'), // Ensure outfile path is absolute or relative to cwd
   loader: { '.tsx': 'tsx' },
   format: 'esm',
   // Explicitly set JSX factory to 'automatic'
@@ -49,7 +49,7 @@ esbuild.build({
   sourcemap: true, // Generate sourcemaps for easier debugging
   logLevel: 'info',
 }).then(() => {
-  console.log('esbuild bundling complete. Output: dist/index.js');
+  console.log('esbuild bundling complete. Output: public/index.js');
 }).catch((error) => {
   console.error('Build failed:', error);
   process.exit(1);
