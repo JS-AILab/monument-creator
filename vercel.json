@@ -4,11 +4,17 @@
   "outputDirectory": "public",
   "functions": {
     "api/creations.ts": {
-      "runtime": "nodejs22.x"
+      "runtime": "@vercel/node@3.2.14"
     }
   },
   "routes": [
-    { "src": "/api/creations", "dest": "/api/creations" },
-    { "src": "/(.*)", "dest": "/public/$1" }
+    {
+      "src": "/api/creations",
+      "dest": "/api/creations"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
+    }
   ]
 }
