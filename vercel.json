@@ -1,20 +1,5 @@
 {
   "installCommand": "npm install",
   "buildCommand": "npm run build",
-  "outputDirectory": "public",
-  "functions": {
-    "api/creations.ts": {
-      "runtime": "@vercel/node@3.2.14"
-    }
-  },
-  "routes": [
-    {
-      "src": "/api/creations",
-      "dest": "/api/creations"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/public/$1"
-    }
-  ]
+  "outputDirectory": "public"
 }
