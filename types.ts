@@ -9,6 +9,32 @@ export enum APIStatus {
 }
 
 /**
+ * Represents the status of a geolocation request.
+ */
+export enum LocationStatus {
+  IDLE = 'IDLE',
+  LOADING = 'LOADING',
+  SUCCESS = 'SUCCESS',
+  ERROR = 'ERROR',
+  PERMISSION_DENIED = 'PERMISSION_DENIED',
+  UNAVAILABLE = 'UNAVAILABLE',
+  TIMEOUT = 'TIMEOUT',
+}
+
+/**
+ * Interface for a saved monument creation.
+ */
+export interface Creation {
+  id: number;
+  monument_prompt: string;
+  scene_prompt: string;
+  image_url: string; // Base64 data URI
+  created_at: string; // ISO string representation of the timestamp
+  latitude: number; // Latitude of the monument
+  longitude: number; // Longitude of the monument
+}
+
+/**
  * Interface for the response structure when generating content with an image.
  */
 export interface GenerateImageResponse {
