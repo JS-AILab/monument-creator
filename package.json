@@ -5,10 +5,15 @@
   "scripts": {
     "build": "node esbuild.config.js"
   },
-  "devDependencies": {
-    "esbuild": "^0.23.0",
+  "dependencies": {
     "pg": "^8.12.0",
     "@types/pg": "^8.11.6"
   },
-  "installCommand": "npm install"
+  "devDependencies": {
+    "esbuild": "^0.23.0"
+  },
+  "installCommand": "npm install",
+  "engines": {
+    "node": "22.x"
+  }
 }
