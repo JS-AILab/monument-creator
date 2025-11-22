@@ -4,10 +4,7 @@
   "outputDirectory": "public",
   "functions": {
     "api/creations.ts": {
-      "runtime": "nodejs22.x",
-      "config": {
-        "module": "ESModule"
-      }
+      "runtime": "nodejs22.x"
     }
   },
   "routes": [
