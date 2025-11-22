@@ -13,6 +13,7 @@ declare global {
       class LatLng {
         // Minimal placeholder for LatLng class if it's used as a type (e.g., in unions with LatLngLiteral).
         // Actual implementation is handled by the Google Maps API runtime.
+        constructor(lat: number, lng: number);
       }
       interface MapOptions {
         center?: LatLngLiteral | LatLng;
@@ -43,6 +44,8 @@ declare global {
       class Marker {
         constructor(opts?: MarkerOptions);
         addListener(eventName: string, handler: Function): void;
+        // Fix: Add setMap method for controlling marker visibility/attachment to map
+        setMap(map: Map | null): void;
       }
       interface InfoWindowOptions {}
       class InfoWindow {

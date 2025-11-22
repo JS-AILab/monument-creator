@@ -12,6 +12,8 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  // Fix: Use a ref to store markers for proper management (clearing them).
+  const markersRef = useRef<google.maps.Marker[]>([]);
 
   const [mapLoadingStatus, setMapLoadingStatus] = useState<APIStatus>(APIStatus.IDLE);
   const [creations, setCreations] = useState<Creation[]>([]);
@@ -115,10 +117,11 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
         infoWindowRef.current = new window.google.maps.InfoWindow(); // Initialize info window
       }
 
-      // To efficiently update markers without duplicates, we could store them in a ref
-      // and clear them before adding new ones. For simplicity here, we assume markers are re-added
-      // only when creations or map status changes, and old ones from previous render cycle are implicitly cleaned.
-      // In a more complex app, manage marker references explicitly.
+      // Fix: Clear all existing markers before adding new ones
+      if (markersRef.current.length > 0) {
+        markersRef.current.forEach((marker) => marker.setMap(null));
+        markersRef.current = []; // Clear the array
+      }
 
       const bounds = new window.google.maps.LatLngBounds();
       let hasValidCoords = false;
@@ -135,6 +138,10 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
             title: creation.monument_prompt,
             animation: window.google.maps.Animation.DROP, // Drop animation on load
           });
+
+          // Store marker reference for potential clearing later
+          markersRef.current.push(marker);
+
 
           // Add click listener to show info window
           marker.addListener('click', () => {

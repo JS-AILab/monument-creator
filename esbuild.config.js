@@ -47,6 +47,7 @@ esbuild.build({
   // Fallback to empty string if not set, for local development robustness
   define: {
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || ''),
+    'process.env.GOOGLE_MAPS_API_KEY': JSON.stringify(process.env.GOOGLE_MAPS_API_KEY || ''), // Define Google Maps API Key
   },
   // Mark these imports as external, relying on the importmap in index.html
   external: ['react', 'react-dom', 'react-dom/client', '@google/genai', 'react/jsx-runtime'],
