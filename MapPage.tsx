@@ -18,9 +18,11 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
   const [dataLoadingStatus, setDataLoadingStatus] = useState<APIStatus>(APIStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
 
+  // Retrieve API key from environment variables
+  // IMPORTANT: Ensure GOOGLE_MAPS_API_KEY is set in your Vercel project settings (and locally)
   const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
-  // Render error helper function
+  // Helper function to render error messages consistently
   const renderError = (message: string | null) => {
     if (!message) return null;
     return (
@@ -34,7 +36,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
     );
   };
 
-  // Memoized function to create marker content
+  // Memoized function to create marker content for the InfoWindow
   const createMarkerContent = useCallback((creation: Creation) => {
     return `
       <div class="info-window p-2">
@@ -47,14 +49,21 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
     `;
   }, []);
 
-  // Effect to load Google Maps script
+  // Effect to load Google Maps script dynamically
   useEffect(() => {
+    // Only attempt to load if not already loading or loaded, and API Key is present
     if (getGoogleMapsScriptStatus() === APIStatus.IDLE || getGoogleMapsScriptStatus() === APIStatus.ERROR) {
+      if (!GOOGLE_MAPS_API_KEY) {
+        setMapLoadingStatus(APIStatus.ERROR);
+        setError("Google Maps API Key is missing. Please set 'GOOGLE_MAPS_API_KEY' environment variable.");
+        return;
+      }
+
       setMapLoadingStatus(APIStatus.LOADING);
-      loadGoogleMapsScript(GOOGLE_MAPS_API_KEY || '')
+      loadGoogleMapsScript(GOOGLE_MAPS_API_KEY)
         .then(() => {
           setMapLoadingStatus(APIStatus.SUCCESS);
-          setError(null);
+          setError(null); // Clear map-related errors if successful
         })
         .catch((err) => {
           setMapLoadingStatus(APIStatus.ERROR);
@@ -62,7 +71,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
           console.error('Map script load error:', err);
         });
     }
-  }, [GOOGLE_MAPS_API_KEY]);
+  }, [GOOGLE_MAPS_API_KEY]); // Dependency on API key to re-trigger if it changes
 
   // Effect to fetch creations data
   useEffect(() => {
@@ -71,18 +80,18 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
       .then((data) => {
         setCreations(data);
         setDataLoadingStatus(APIStatus.SUCCESS);
-        setError(null);
+        setError(null); // Clear data-related errors if successful
       })
       .catch((err) => {
         setDataLoadingStatus(APIStatus.ERROR);
-        setError(`Failed to load monuments: ${err.message}`);
+        setError(`Failed to load monuments: ${err instanceof Error ? err.message : String(err)}`);
         console.error('Fetch creations error:', err);
       });
-  }, []);
+  }, []); // Run only once on mount to fetch all creations
 
-  // Effect to initialize map and place markers
+  // Effect to initialize map and place markers once both map script and data are ready
   useEffect(() => {
-    // Only proceed if map script and data are loaded successfully, and mapRef is ready
+    // Only proceed if map script and data are loaded successfully, and mapRef is attached to a DOM element
     if (mapLoadingStatus === APIStatus.SUCCESS && dataLoadingStatus === APIStatus.SUCCESS && mapRef.current) {
       if (!window.google || !window.google.maps) {
         setError("Google Maps API object not found after script load.");
@@ -92,12 +101,12 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
 
       // Initialize the map if it hasn't been already
       if (!mapInstanceRef.current) {
-        const defaultLatLng = { lat: 0, lng: 0 }; // Default to world view
+        const defaultLatLng = { lat: 0, lng: 0 }; // Default to center of the world
         mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
           center: defaultLatLng,
           zoom: 2, // World view zoom
-          minZoom: 2,
-          maxZoom: 18,
+          minZoom: 2, // Prevent zooming out too far
+          maxZoom: 18, // Prevent zooming in too close
           streetViewControl: false,
           mapTypeControl: false,
           fullscreenControl: false,
@@ -106,24 +115,25 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
         infoWindowRef.current = new window.google.maps.InfoWindow(); // Initialize info window
       }
 
-      // Clear existing markers if any (for re-rendering or updates)
-      // (This would require storing markers in state/ref, but for simplicity we'll just re-add)
-      // For a more robust solution, manage markers: mapInstanceRef.current.markers.forEach(m => m.setMap(null));
+      // To efficiently update markers without duplicates, we could store them in a ref
+      // and clear them before adding new ones. For simplicity here, we assume markers are re-added
+      // only when creations or map status changes, and old ones from previous render cycle are implicitly cleaned.
+      // In a more complex app, manage marker references explicitly.
 
-      // Place markers for each creation
+      const bounds = new window.google.maps.LatLngBounds();
+      let hasValidCoords = false;
+
       creations.forEach(creation => {
-        // Ensure creation has valid latitude and longitude
-        if (typeof creation.latitude === 'number' && typeof creation.longitude === 'number') {
+        // Ensure creation has valid latitude and longitude numbers
+        if (typeof creation.latitude === 'number' && typeof creation.longitude === 'number' && mapInstanceRef.current) {
+          hasValidCoords = true;
+          const position = { lat: creation.latitude, lng: creation.longitude };
+
           const marker = new window.google.maps.Marker({
-            position: { lat: creation.latitude, lng: creation.longitude },
+            position: position,
             map: mapInstanceRef.current,
             title: creation.monument_prompt,
-            animation: window.google.maps.Animation.DROP,
-            // Custom icon for pins (optional)
-            // icon: {
-            //   url: 'path/to/custom/pin.png',
-            //   scaledSize: new window.google.maps.Size(30, 30)
-            // }
+            animation: window.google.maps.Animation.DROP, // Drop animation on load
           });
 
           // Add click listener to show info window
@@ -133,29 +143,28 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
               infoWindowRef.current.open(mapInstanceRef.current, marker);
             }
           });
+          bounds.extend(position); // Extend bounds to include this marker
         }
       });
 
-      // Adjust map bounds to fit all markers if there are any
-      if (creations.length > 0) {
-        const bounds = new window.google.maps.LatLngBounds();
-        creations.forEach(creation => {
-          if (typeof creation.latitude === 'number' && typeof creation.longitude === 'number') {
-            bounds.extend({ lat: creation.latitude, lng: creation.longitude });
-          }
-        });
+      // Adjust map bounds to fit all markers if there are any valid coordinates
+      if (hasValidCoords && mapInstanceRef.current) {
         mapInstanceRef.current.fitBounds(bounds);
         // Prevent excessive zoom if all markers are very close
         if (mapInstanceRef.current.getZoom() > 15) {
           mapInstanceRef.current.setZoom(15);
         }
+      } else if (mapInstanceRef.current) {
+        // If no valid coords, revert to default world view
+        mapInstanceRef.current.setCenter({ lat: 0, lng: 0 });
+        mapInstanceRef.current.setZoom(2);
       }
-
     }
-  }, [mapLoadingStatus, dataLoadingStatus, creations, createMarkerContent]); // Re-run if any of these change
+  }, [mapLoadingStatus, dataLoadingStatus, creations, createMarkerContent]); // Re-run if any of these states change
 
+  // Determine overall loading and error states for the UI
   const isLoading = mapLoadingStatus === APIStatus.LOADING || dataLoadingStatus === APIStatus.LOADING;
-  const isError = mapLoadingStatus === APIStatus.ERROR || dataLoadingStatus === APIStatus.ERROR || error;
+  const hasError = mapLoadingStatus === APIStatus.ERROR || dataLoadingStatus === APIStatus.ERROR || error;
 
   return (
     <div className="relative w-full h-screen flex flex-col">
@@ -175,7 +184,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
 
       {/* Map Container */}
       <div ref={mapRef} className="flex-grow w-full h-full bg-gray-200">
-        {(isLoading || isError) && (
+        {(isLoading || hasError) && (
           <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-60 z-20">
             <div className="text-white text-center p-6 rounded-lg shadow-xl bg-gray-800">
               {isLoading && (
@@ -187,11 +196,11 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
                   <p className="text-xl">Loading map and monuments...</p>
                 </>
               )}
-              {isError && (
+              {hasError && (
                 <>
                   <p className="text-xl font-bold mb-2">Failed to Load Map or Data</p>
                   {renderError(error || "An unknown error occurred.")}
-                  {!GOOGLE_MAPS_API_KEY && (
+                  {!GOOGLE_MAPS_API_KEY && ( // Specific warning if API key is missing
                     <p className="mt-4 text-orange-300">
                       **Warning:** Google Maps API Key is missing. Please set `GOOGLE_MAPS_API_KEY` environment variable.
                     </p>

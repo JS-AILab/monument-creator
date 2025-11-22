@@ -38,19 +38,19 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       for await (const chunk of req) {
         body += chunk.toString();
       }
-      const { monumentPrompt, scenePrompt, imageUrl } = JSON.parse(body);
+      const { monumentPrompt, scenePrompt, imageUrl, latitude, longitude } = JSON.parse(body);
 
-      // Validate incoming data
-      if (!monumentPrompt || !scenePrompt || !imageUrl) {
+      // Validate incoming data including new latitude and longitude
+      if (!monumentPrompt || !scenePrompt || !imageUrl || latitude === undefined || longitude === undefined) {
         res.statusCode = 400;
-        res.write(JSON.stringify({ error: 'Missing required fields: monumentPrompt, scenePrompt, and imageUrl are all necessary.' }));
+        res.write(JSON.stringify({ error: 'Missing required fields: monumentPrompt, scenePrompt, imageUrl, latitude, and longitude are all necessary.' }));
         return res.end();
       }
 
-      // Insert the new creation into the database
+      // Insert the new creation into the database with latitude and longitude
       const result = await currentPool.query(
-        'INSERT INTO creations(monument_prompt, scene_prompt, image_url) VALUES($1, $2, $3) RETURNING id, monument_prompt, scene_prompt, image_url, created_at',
-        [monumentPrompt, scenePrompt, imageUrl]
+        'INSERT INTO creations(monument_prompt, scene_prompt, image_url, latitude, longitude) VALUES($1, $2, $3, $4, $5) RETURNING id, monument_prompt, scene_prompt, image_url, latitude, longitude, created_at',
+        [monumentPrompt, scenePrompt, imageUrl, latitude, longitude]
       );
       // Return the newly created record
       res.statusCode = 201;
@@ -58,9 +58,9 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       return res.end();
     } else if (req.method === 'GET') {
       // Handle retrieving all creations
-      // Fetch all creations, ordered by creation date (newest first)
+      // Fetch all creations, ordered by creation date (newest first), including latitude and longitude
       const result = await currentPool.query(
-        'SELECT id, monument_prompt, scene_prompt, image_url, created_at FROM creations ORDER BY created_at DESC'
+        'SELECT id, monument_prompt, scene_prompt, image_url, latitude, longitude, created_at FROM creations ORDER BY created_at DESC'
       );
       // Return the list of creations
       res.statusCode = 200;
