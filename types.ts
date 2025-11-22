@@ -10,6 +10,7 @@ export enum APIStatus {
 
 /**
  * Represents the status of a geolocation request.
+ * (Note: Direct geolocation input removed from App.tsx, but enum remains if needed for other contexts)
  */
 export enum LocationStatus {
   IDLE = 'IDLE',

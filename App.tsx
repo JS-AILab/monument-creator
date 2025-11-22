@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { generateMonumentImage } from './services/geminiService';
-import { APIStatus, LocationStatus } from './types';
-import { saveCreation } from './services/apiService'; // Import saveCreation
+import React, { useState, useCallback } from 'react';
+import { generateMonumentImage, extractLocationFromPrompt } from './services/geminiService'; // Import extractLocationFromPrompt
+import { APIStatus } from './types';
+import { saveCreation } from './services/apiService';
 
 // Define props for the App component (now the Create Monument Page)
 interface AppProps {
@@ -15,13 +15,10 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
   const [apiStatus, setApiStatus] = useState<APIStatus>(APIStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
 
-  // New states for geolocation
-  const [latitude, setLatitude] = useState<number | null>(null);
-  const [longitude, setLongitude] = useState<number | null>(null);
-  const [locationStatus, setLocationStatus] = useState<LocationStatus>(LocationStatus.IDLE);
-  const [locationError, setLocationError] = useState<string | null>(null);
+  // New state for location feedback
+  const [locationFeedback, setLocationFeedback] = useState<string | null>(null);
 
-  const [isSaving, setIsSaving] = useState<boolean>(false); // Used when saving the generated image + location
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Helper function to render error messages consistently
   const renderError = (message: string | null) => {
@@ -37,90 +34,77 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
     );
   };
 
-  const getUserLocation = useCallback(() => {
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation is not supported by your browser.');
-      setLocationStatus(LocationStatus.UNAVAILABLE);
-      return;
-    }
-
-    setLocationStatus(LocationStatus.LOADING);
-    setLocationError(null); // Clear previous location errors
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLatitude(position.coords.latitude);
-        setLongitude(position.coords.longitude);
-        setLocationStatus(LocationStatus.SUCCESS);
-        setLocationError(null);
-      },
-      (geoError) => {
-        console.error('Geolocation error:', geoError);
-        setLocationStatus(LocationStatus.ERROR);
-        let errorMessage = 'Failed to get location.';
-        switch (geoError.code) {
-          case geoError.PERMISSION_DENIED:
-            errorMessage = 'Permission denied to access location. Please enable it in browser settings.';
-            setLocationStatus(LocationStatus.PERMISSION_DENIED);
-            break;
-          case geoError.POSITION_UNAVAILABLE:
-            errorMessage = 'Location information is unavailable.';
-            setLocationStatus(LocationStatus.UNAVAILABLE);
-            break;
-          case geoError.TIMEOUT:
-            errorMessage = 'The request to get user location timed out.';
-            setLocationStatus(LocationStatus.TIMEOUT);
-            break;
-          default:
-            errorMessage = `An unknown geolocation error occurred: ${geoError.message}`;
-            break;
-        }
-        setLocationError(errorMessage);
-        setLatitude(null);
-        setLongitude(null);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000, // 10 seconds
-        maximumAge: 0, // No cached position
-      }
-    );
-  }, []);
-
   const handleGenerate = useCallback(async () => {
     setError(null);
     setGeneratedImageUrl(null);
+    setLocationFeedback(null); // Clear previous location feedback
 
     if (!monumentPrompt || !scenePrompt) {
       setError('Please enter both monument and scene descriptions.');
       return;
     }
 
-    // Ensure location is provided before generating and saving
-    if (latitude === null || longitude === null) {
-      setError('Please provide a location for the monument (using current location or manual input).');
-      return;
-    }
-
     setApiStatus(APIStatus.LOADING);
     try {
-      const response = await generateMonumentImage(monumentPrompt, scenePrompt);
-      const newImageUrl = `data:${response.mimeType};base64,${response.base64ImageData}`;
+      // 1. Generate the image first
+      const imageResponse = await generateMonumentImage(monumentPrompt, scenePrompt);
+      const newImageUrl = `data:${imageResponse.mimeType};base64,${imageResponse.base64ImageData}`;
       setGeneratedImageUrl(newImageUrl);
-      setApiStatus(APIStatus.SUCCESS);
 
-      // Attempt to save the new creation to the database with location
+      // 2. Extract location using Gemini
+      let derivedLocationString = "Generic World Location"; // Default fallback
+      let latitude: number = 0.0;
+      let longitude: number = 0.0;
+
+      try {
+        derivedLocationString = await extractLocationFromPrompt(monumentPrompt, scenePrompt);
+        setLocationFeedback(`Gemini inferred location: "${derivedLocationString}"`);
+
+        // 3. Geocode the extracted location string using Google Maps Geocoding API
+        if (derivedLocationString && derivedLocationString !== "Generic World Location") {
+          if (!window.google || !window.google.maps || !window.google.maps.Geocoder) {
+            console.warn("Google Maps Geocoding API not loaded. Falling back to generic location.");
+            setLocationFeedback("Google Maps API not fully loaded for geocoding. Pinning at generic world location.");
+          } else {
+            const geocoder = new window.google.maps.Geocoder();
+            const geocodeResult = await new Promise<google.maps.GeocoderResult[]>((resolve, reject) => {
+              geocoder.geocode({ address: derivedLocationString }, (results, status) => {
+                if (status === window.google.maps.GeocoderStatus.OK && results && results.length > 0) {
+                  resolve(results);
+                } else {
+                  reject(new Error(`Geocoding failed with status: ${status}`));
+                }
+              });
+            });
+
+            if (geocodeResult && geocodeResult.length > 0) {
+              latitude = geocodeResult[0].geometry.location.lat();
+              longitude = geocodeResult[0].geometry.location.lng();
+              setLocationFeedback(`Location derived from prompt: ${geocodeResult[0].formatted_address}`);
+            } else {
+              console.warn("Geocoding returned no results. Falling back to generic location.");
+              setLocationFeedback("Could not find specific coordinates for the inferred location. Pinning at generic world location.");
+            }
+          }
+        } else {
+          setLocationFeedback("No specific real-world location inferred from prompts. Pinning at generic world location (Null Island).");
+        }
+      } catch (locationErr) {
+        console.error('Error in location derivation (Gemini or Geocoding):', locationErr);
+        setLocationFeedback("Failed to derive location from prompts. Pinning at generic world location (Null Island).");
+        // Lat/Lng remain 0,0 from initialization
+      }
+
+      // 4. Save the generated image and derived location to the database
       setIsSaving(true);
       try {
         await saveCreation({
           monumentPrompt,
           scenePrompt,
           imageUrl: newImageUrl,
-          latitude, // Include latitude
-          longitude, // Include longitude
+          latitude, // Derived latitude
+          longitude, // Derived longitude
         });
-        // We don't need to update local state for savedCreations here anymore,
-        // as the map page will fetch its own updated list upon navigation.
       } catch (saveErr) {
         console.error('Failed to save creation to database:', saveErr);
         setError(`Failed to save this creation to history: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`);
@@ -128,13 +112,15 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
         setIsSaving(false);
       }
 
+      setApiStatus(APIStatus.SUCCESS);
+
     } catch (err: unknown) {
-      console.error('Failed to generate image:', err);
+      console.error('Failed to generate image or process location:', err);
       const errorMessage = err instanceof Error ? err.message : String(err);
       setError(`${errorMessage}`);
       setApiStatus(APIStatus.ERROR);
     }
-  }, [monumentPrompt, scenePrompt, latitude, longitude]); // Dependencies for useCallback
+  }, [monumentPrompt, scenePrompt]);
 
   const handleShare = useCallback(async () => {
     if (generatedImageUrl && navigator.share) {
@@ -212,69 +198,11 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
           ></textarea>
         </div>
 
-        {/* Geolocation Input Section */}
-        <div className="bg-blue-50 p-4 rounded-lg shadow-inner">
-          <h3 className="text-xl font-bold text-[#1a73e8] mb-4">3. Monument Location</h3>
-          {renderError(locationError)}
-
-          <div className="flex flex-col sm:flex-row gap-4 mb-4 items-center">
-            <button
-              onClick={getUserLocation}
-              disabled={locationStatus === LocationStatus.LOADING || apiStatus === APIStatus.LOADING}
-              className="w-full sm:w-auto py-2 px-4 bg-[#34A853] text-white font-bold rounded-lg shadow-md hover:bg-[#288a44] focus:outline-none focus:ring-4 focus:ring-[#7DDA86] transition-all duration-300 transform active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-              aria-label="Use current location"
-            >
-              {locationStatus === LocationStatus.LOADING ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Getting Location...
-                </>
-              ) : (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
-                    <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 9a.75.75 0 00-1.5 0v2.25H9a.75.75 0 000 1.5h2.25V15a.75.75 0 001.5 0v-2.25H15a.75.75 0 000-1.5h-2.25V9z" clipRule="evenodd" />
-                  </svg>
-                  Use Current Location
-                </>
-              )}
-            </button>
-            <span className="text-gray-600">OR</span>
-            <div className="flex-grow flex flex-col sm:flex-row gap-2">
-              <input
-                type="number"
-                step="any"
-                className="w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-[#4285F4] focus:border-[#4285F4] transition-all duration-200"
-                placeholder="Latitude (e.g., 34.05)"
-                value={latitude === null ? '' : latitude}
-                onChange={(e) => setLatitude(parseFloat(e.target.value) || null)}
-                disabled={apiStatus === APIStatus.LOADING}
-                aria-label="Manual latitude input"
-              />
-              <input
-                type="number"
-                step="any"
-                className="w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-[#4285F4] focus:border-[#4285F4] transition-all duration-200"
-                placeholder="Longitude (e.g., -118.25)"
-                value={longitude === null ? '' : longitude}
-                onChange={(e) => setLongitude(parseFloat(e.target.value) || null)}
-                disabled={apiStatus === APIStatus.LOADING}
-                aria-label="Manual longitude input"
-              />
-            </div>
-          </div>
-          {latitude !== null && longitude !== null && (
-            <p className="text-center text-sm text-gray-700">
-              Location selected: <span className="font-semibold">Lat: {latitude.toFixed(5)}, Lng: {longitude.toFixed(5)}</span>
-            </p>
-          )}
-        </div>
+        {/* Removed Geolocation Input Section - location is now derived from prompts */}
 
         <button
           onClick={handleGenerate}
-          disabled={apiStatus === APIStatus.LOADING || latitude === null || longitude === null}
+          disabled={apiStatus === APIStatus.LOADING || !monumentPrompt || !scenePrompt}
           className="w-full py-3 px-6 bg-[#4285F4] text-white font-bold rounded-lg shadow-lg hover:bg-[#346dc9] focus:outline-none focus:ring-4 focus:ring-[#a0c3ff] transition-all duration-300 transform active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
         >
           {apiStatus === APIStatus.LOADING ? (
@@ -283,7 +211,7 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              Generating Monument...
+              Generating Monument & Locating...
             </>
           ) : (
             'Generate Monument Image'
@@ -296,6 +224,11 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
           <h2 className="text-2xl md:text-3xl font-bold text-center text-[#1a73e8] mb-6">
             Your Generated Monument
           </h2>
+          {locationFeedback && (
+            <p className="text-center text-gray-700 text-sm mb-4 bg-blue-50 p-2 rounded-md shadow-sm" aria-live="polite">
+              {locationFeedback}
+            </p>
+          )}
           <div className="relative w-full h-auto bg-gray-100 rounded-xl overflow-hidden shadow-xl border border-gray-200 flex items-center justify-center p-2">
             <img
               src={generatedImageUrl}

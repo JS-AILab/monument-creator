@@ -1,4 +1,4 @@
-import { APIStatus } from '../types'; // Assuming types.ts is in the parent directory
+import { APIStatus } from '../types';
 
 // Fix: Add minimal type declarations for google.maps to satisfy TypeScript compiler.
 // This defines the google.maps namespace and its types before they are used to extend the Window interface.
@@ -11,9 +11,9 @@ declare global {
         lng: number;
       }
       class LatLng {
-        // Minimal placeholder for LatLng class if it's used as a type (e.g., in unions with LatLngLiteral).
-        // Actual implementation is handled by the Google Maps API runtime.
         constructor(lat: number, lng: number);
+        lat(): number;
+        lng(): number;
       }
       interface MapOptions {
         center?: LatLngLiteral | LatLng;
@@ -44,8 +44,7 @@ declare global {
       class Marker {
         constructor(opts?: MarkerOptions);
         addListener(eventName: string, handler: Function): void;
-        // Fix: Add setMap method for controlling marker visibility/attachment to map
-        setMap(map: Map | null): void;
+        setMap(map: Map | null): void; // Method for controlling marker visibility/attachment
       }
       interface InfoWindowOptions {}
       class InfoWindow {
@@ -60,6 +59,63 @@ declare global {
       class Size {
         constructor(width: number, height: number, widthUnit?: string, heightUnit?: string);
       }
+      // Geocoding types
+      class Geocoder {
+        geocode(request: GeocoderRequest, callback: (results: GeocoderResult[] | null, status: GeocoderStatus) => void): void;
+      }
+      interface GeocoderRequest {
+        address?: string;
+        location?: LatLng | LatLngLiteral;
+        placeId?: string;
+        bounds?: LatLngBounds | LatLngBoundsLiteral;
+        componentRestrictions?: GeocoderComponentRestrictions;
+        region?: string;
+      }
+      enum GeocoderStatus {
+        OK = 'OK',
+        ZERO_RESULTS = 'ZERO_RESULTS',
+        OVER_QUERY_LIMIT = 'OVER_QUERY_LIMIT',
+        REQUEST_DENIED = 'REQUEST_DENIED',
+        INVALID_REQUEST = 'INVALID_REQUEST',
+        UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+      }
+      interface GeocoderResult {
+        address_components: GeocoderAddressComponent[];
+        formatted_address: string;
+        geometry: GeocoderGeometry;
+        place_id: string;
+        types: string[];
+      }
+      interface GeocoderAddressComponent {
+        long_name: string;
+        short_name: string;
+        types: string[];
+      }
+      interface GeocoderGeometry {
+        location: LatLng;
+        location_type: GeocoderLocationType;
+        viewport: LatLngBounds;
+        bounds?: LatLngBounds;
+      }
+      enum GeocoderLocationType {
+        ROOFTOP = 'ROOFTOP',
+        RANGE_INTERPOLATED = 'RANGE_INTERPOLATED',
+        GEOMETRIC_CENTER = 'GEOMETRIC_CENTER',
+        APPROXIMATE = 'APPROXIMATE',
+      }
+      interface LatLngBoundsLiteral {
+        east: number;
+        north: number;
+        south: number;
+        west: number;
+      }
+      interface GeocoderComponentRestrictions {
+        administrativeArea?: string;
+        country?: string;
+        locality?: string;
+        postalCode?: string;
+        route?: string;
+      }
     }
   }
 
@@ -67,8 +123,6 @@ declare global {
   interface Window {
     google: {
       maps: typeof google.maps;
-      // You can add other top-level google services here if needed, e.g.,
-      // places?: typeof google.maps.places; // If places library is used
     };
   }
 }
@@ -105,7 +159,7 @@ export function loadGoogleMapsScript(apiKey: string): Promise<void> {
     googleMapsScriptStatus = APIStatus.LOADING;
 
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`; // 'places' library is useful but optional
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,geocoding`; // Added 'geocoding' library
     script.async = true;
     script.defer = true;
     script.onerror = (error) => {

@@ -2,6 +2,8 @@ import { GoogleGenAI, Modality, GenerateContentResponse } from "@google/genai";
 import { GenerateImageResponse } from "../types";
 
 const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
+// Using a text model for extracting location, typically a fast one like flash
+const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 
 /**
  * Generates a monument image by combining two prompts using the Gemini API.
@@ -60,5 +62,68 @@ export async function generateMonumentImage(
     console.error("Error generating monument image:", error);
     // Re-throw to be handled by the calling component
     throw new Error(`Failed to generate image: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Uses Gemini API to extract the most prominent real-world geographic location from text.
+ * If no clear real-world location is found, it returns "Generic World Location".
+ *
+ * @param monumentPrompt The monument description.
+ * @param scenePrompt The scene description.
+ * @returns A promise that resolves to a string representing the extracted location or "Generic World Location".
+ * @throws Throws an error if the API call fails or the response is invalid.
+ */
+export async function extractLocationFromPrompt(
+  monumentPrompt: string,
+  scenePrompt: string
+): Promise<string> {
+  const apiKey = process.env.API_KEY;
+
+  if (!apiKey) {
+    throw new Error(
+      "Google Gemini API Key is not configured. Please ensure your 'API_KEY' " +
+      "environment variable is set correctly in your deployment environment (e.g., Vercel)."
+    );
+  }
+
+  const ai = new GoogleGenAI({ apiKey: apiKey });
+
+  const combinedPrompt = `From the following text, strictly identify and return the single most prominent real-world geographic location (city, country, landmark, region, etc.) mentioned or strongly implied.
+  If multiple locations are present, pick the one most relevant to the "scene".
+  If no clear real-world geographic location is found or implied, explicitly return ONLY the string "Generic World Location".
+  Do NOT return fictional places or general descriptors like "forest," "mountain," "city," unless they are part of a specific named location (e.g., "Black Forest, Germany").
+  Return the location name only. Do NOT add any other text, explanations, or punctuation.
+  Text: "A monument described as '${monumentPrompt}' in a scene of '${scenePrompt}'."`;
+
+  try {
+    const response: GenerateContentResponse = await ai.models.generateContent({
+      model: GEMINI_TEXT_MODEL,
+      contents: {
+        parts: [{ text: combinedPrompt }],
+      },
+      config: {
+        maxOutputTokens: 50, // Limit output to just the location name
+        temperature: 0.1, // Keep temperature low for factual extraction
+      },
+    });
+
+    const extractedText = response.text?.trim();
+
+    if (extractedText) {
+      // Basic cleanup and validation
+      const cleanedLocation = extractedText.replace(/['".]/g, '').trim();
+      if (cleanedLocation === "Generic World Location") {
+        return "Generic World Location";
+      }
+      return cleanedLocation;
+    } else {
+      console.warn("Gemini API returned no text for location extraction. Defaulting to 'Generic World Location'.");
+      return "Generic World Location";
+    }
+  } catch (error) {
+    console.error("Error extracting location with Gemini:", error);
+    // Fallback to generic if API call itself fails
+    return "Generic World Location";
   }
 }

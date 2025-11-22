@@ -7,13 +7,13 @@ import { fileURLToPath } from 'url'; // Required for __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const outputDir = path.join(__dirname, 'public'); // Changed from 'dist' to 'public'
+const outputDir = path.join(__dirname, 'public');
 
 console.log('Starting build process...');
 
 // Create output directory if it doesn't exist
 if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true }); // Ensure recursive flag for nested paths
+  fs.mkdirSync(outputDir, { recursive: true });
   console.log(`Created output directory: ${outputDir}`);
 } else {
   console.log(`Output directory already exists: ${outputDir}`);
@@ -31,28 +31,24 @@ const htmlDest = path.join(outputDir, 'index.html');
 fs.copyFileSync(htmlSrc, htmlDest);
 console.log(`Copied ${htmlSrc} to ${htmlDest}`);
 
-
 // Build the React application with esbuild
 esbuild.build({
   entryPoints: ['index.tsx'],
   bundle: true,
-  outfile: path.join(outputDir, 'index.js'), // Ensure outfile path is absolute or relative to cwd
+  outfile: path.join(outputDir, 'index.js'),
   loader: { '.tsx': 'tsx' },
   format: 'esm',
-  // Explicitly set JSX factory to 'automatic'
   jsx: 'automatic',
-  // Target modern browsers
   target: 'esnext',
-  // Define process.env.API_KEY for substitution during the build
-  // Fallback to empty string if not set, for local development robustness
+  // Define environment variables for client-side code
   define: {
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || ''),
     'process.env.GOOGLE_MAPS_API_KEY': JSON.stringify(process.env.GOOGLE_MAPS_API_KEY || ''), // Define Google Maps API Key
   },
   // Mark these imports as external, relying on the importmap in index.html
   external: ['react', 'react-dom', 'react-dom/client', '@google/genai', 'react/jsx-runtime'],
-  minify: true, // Minify the output JavaScript
-  sourcemap: true, // Generate sourcemaps for easier debugging
+  minify: true,
+  sourcemap: true,
   logLevel: 'info',
 }).then(() => {
   console.log('esbuild bundling complete. Output: public/index.js');
