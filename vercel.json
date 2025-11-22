@@ -1,14 +1,5 @@
 {
   "installCommand": "npm install",
   "buildCommand": "npm run build",
-  "outputDirectory": "public",
-  "functions": {
-    "api/creations.ts": {
-      "runtime": "nodejs2o.x"
-    }
-  },
-  "routes": [
-    { "src": "/api/creations", "dest": "/api/creations" },
-    { "src": "/(.*)", "dest": "/public/$1" }
-  ]
+  "outputDirectory": "public"
 }
