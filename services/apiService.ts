@@ -1,21 +1,18 @@
-/**
- * Interface for a saved monument creation.
- */
-export interface Creation {
-  id: number;
-  monument_prompt: string;
-  scene_prompt: string;
-  image_url: string; // Base64 data URI
-  created_at: string; // ISO string representation of the timestamp
-}
+import { Creation } from '../types'; // Import updated Creation interface
 
 /**
  * Sends a new monument creation to the backend API for storage.
- * @param data An object containing the monument prompt, scene prompt, and generated image URL.
+ * @param data An object containing the monument prompt, scene prompt, generated image URL, latitude, and longitude.
  * @returns A promise that resolves to the newly created Creation object from the database.
  * @throws An error if the API call fails.
  */
-export async function saveCreation(data: { monumentPrompt: string, scenePrompt: string, imageUrl: string }): Promise<Creation> {
+export async function saveCreation(data: {
+  monumentPrompt: string;
+  scenePrompt: string;
+  imageUrl: string;
+  latitude: number; // Added latitude
+  longitude: number; // Added longitude
+}): Promise<Creation> {
   const response = await fetch('/api/creations', {
     method: 'POST',
     headers: {
