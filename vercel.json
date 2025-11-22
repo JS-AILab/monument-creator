@@ -1,4 +1,17 @@
 {
+  "installCommand": "npm install",
   "buildCommand": "npm run build",
-  "outputDirectory": "public"
+  "outputDirectory": "public",
+  "functions": {
+    "api/creations.ts": {
+      "runtime": "nodejs22.x",
+      "config": {
+        "module": "ESModule"
+      }
+    }
+  },
+  "routes": [
+    { "src": "/api/creations", "dest": "/api/creations" },
+    { "src": "/(.*)", "dest": "/public/$1" }
+  ]
 }
