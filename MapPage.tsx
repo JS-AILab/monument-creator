@@ -12,8 +12,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-  // Fix: Use a ref to store markers for proper management (clearing them).
-  const markersRef = useRef<google.maps.Marker[]>([]);
+  const markersRef = useRef<google.maps.Marker[]>([]); // Ref to store markers for proper management
 
   const [mapLoadingStatus, setMapLoadingStatus] = useState<APIStatus>(APIStatus.IDLE);
   const [creations, setCreations] = useState<Creation[]>([]);
@@ -21,7 +20,6 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
   const [error, setError] = useState<string | null>(null);
 
   // Retrieve API key from environment variables
-  // IMPORTANT: Ensure GOOGLE_MAPS_API_KEY is set in your Vercel project settings (and locally)
   const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
   // Helper function to render error messages consistently
@@ -53,7 +51,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
 
   // Effect to load Google Maps script dynamically
   useEffect(() => {
-    // Only attempt to load if not already loading or loaded, and API Key is present
+    console.log("MapPage: useEffect for Google Maps script load. Status:", getGoogleMapsScriptStatus());
     if (getGoogleMapsScriptStatus() === APIStatus.IDLE || getGoogleMapsScriptStatus() === APIStatus.ERROR) {
       if (!GOOGLE_MAPS_API_KEY) {
         setMapLoadingStatus(APIStatus.ERROR);
@@ -65,106 +63,125 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
       loadGoogleMapsScript(GOOGLE_MAPS_API_KEY)
         .then(() => {
           setMapLoadingStatus(APIStatus.SUCCESS);
-          setError(null); // Clear map-related errors if successful
+          setError(null);
+          console.log("MapPage: Google Maps script loaded successfully.");
         })
         .catch((err) => {
           setMapLoadingStatus(APIStatus.ERROR);
           setError(`Map script failed to load: ${err.message}`);
-          console.error('Map script load error:', err);
+          console.error('MapPage: Map script load error:', err);
         });
     }
-  }, [GOOGLE_MAPS_API_KEY]); // Dependency on API key to re-trigger if it changes
+  }, [GOOGLE_MAPS_API_KEY]);
 
   // Effect to fetch creations data
   useEffect(() => {
+    console.log("MapPage: useEffect for fetching creations data.");
     setDataLoadingStatus(APIStatus.LOADING);
     getCreations()
       .then((data) => {
         setCreations(data);
         setDataLoadingStatus(APIStatus.SUCCESS);
-        setError(null); // Clear data-related errors if successful
+        setError(null);
+        console.log("MapPage: Creations data fetched successfully.", data);
       })
       .catch((err) => {
         setDataLoadingStatus(APIStatus.ERROR);
         setError(`Failed to load monuments: ${err instanceof Error ? err.message : String(err)}`);
-        console.error('Fetch creations error:', err);
+        console.error('MapPage: Fetch creations error:', err);
       });
-  }, []); // Run only once on mount to fetch all creations
+  }, []);
 
   // Effect to initialize map and place markers once both map script and data are ready
   useEffect(() => {
-    // Only proceed if map script and data are loaded successfully, and mapRef is attached to a DOM element
+    console.log("MapPage: useEffect for map init/marker placement. Map status:", mapLoadingStatus, "Data status:", dataLoadingStatus, "MapRef:", mapRef.current);
     if (mapLoadingStatus === APIStatus.SUCCESS && dataLoadingStatus === APIStatus.SUCCESS && mapRef.current) {
       if (!window.google || !window.google.maps) {
         setError("Google Maps API object not found after script load.");
         setMapLoadingStatus(APIStatus.ERROR);
+        console.error("MapPage: window.google.maps not found.");
         return;
       }
 
       // Initialize the map if it hasn't been already
       if (!mapInstanceRef.current) {
-        const defaultLatLng = { lat: 0, lng: 0 }; // Default to center of the world
+        const defaultLatLng = { lat: 0, lng: 0 };
         mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
           center: defaultLatLng,
-          zoom: 2, // World view zoom
-          minZoom: 2, // Prevent zooming out too far
-          maxZoom: 18, // Prevent zooming in too close
+          zoom: 2,
+          minZoom: 2,
+          maxZoom: 18,
           streetViewControl: false,
           mapTypeControl: false,
           fullscreenControl: false,
         });
-
-        infoWindowRef.current = new window.google.maps.InfoWindow(); // Initialize info window
+        infoWindowRef.current = new window.google.maps.InfoWindow();
+        console.log("MapPage: Google Map initialized.");
       }
 
-      // Fix: Clear all existing markers before adding new ones
+      // Clear all existing markers before adding new ones
       if (markersRef.current.length > 0) {
         markersRef.current.forEach((marker) => marker.setMap(null));
-        markersRef.current = []; // Clear the array
+        markersRef.current = [];
+        console.log("MapPage: Cleared existing markers.");
       }
 
       const bounds = new window.google.maps.LatLngBounds();
       let hasValidCoords = false;
+      let allCoordsAreNullIsland = true; // Track if all valid coords are 0,0
 
       creations.forEach(creation => {
-        // Ensure creation has valid latitude and longitude numbers
         if (typeof creation.latitude === 'number' && typeof creation.longitude === 'number' && mapInstanceRef.current) {
           hasValidCoords = true;
           const position = { lat: creation.latitude, lng: creation.longitude };
+
+          if (position.lat !== 0 || position.lng !== 0) {
+            allCoordsAreNullIsland = false; // Found a non-Null Island coordinate
+          }
+          
+          console.log(`MapPage: Placing marker for "${creation.monument_prompt}" at Lat: ${position.lat}, Lng: ${position.lng}`);
 
           const marker = new window.google.maps.Marker({
             position: position,
             map: mapInstanceRef.current,
             title: creation.monument_prompt,
-            animation: window.google.maps.Animation.DROP, // Drop animation on load
+            animation: window.google.maps.Animation.DROP,
           });
 
-          // Store marker reference for potential clearing later
           markersRef.current.push(marker);
 
-
-          // Add click listener to show info window
           marker.addListener('click', () => {
             if (infoWindowRef.current && mapInstanceRef.current) {
               infoWindowRef.current.setContent(createMarkerContent(creation));
               infoWindowRef.current.open(mapInstanceRef.current, marker);
             }
           });
-          bounds.extend(position); // Extend bounds to include this marker
+          bounds.extend(position);
+        } else {
+          console.warn(`MapPage: Skipping marker for creation ID ${creation.id} due to invalid coordinates.`);
         }
       });
 
       // Adjust map bounds to fit all markers if there are any valid coordinates
       if (hasValidCoords && mapInstanceRef.current) {
-        mapInstanceRef.current.fitBounds(bounds);
-        // Prevent excessive zoom if all markers are very close
-        if (mapInstanceRef.current.getZoom() > 15) {
-          mapInstanceRef.current.setZoom(15);
+        if (allCoordsAreNullIsland && creations.length > 1) {
+          // If all valid points are at 0,0, set a reasonable default zoom to make them visible
+          mapInstanceRef.current.setCenter({ lat: 0, lng: 0 });
+          mapInstanceRef.current.setZoom(8); // Zoom level to see Null Island clearly
+          console.log("MapPage: All markers at Null Island, setting default zoom to 8.");
+        } else {
+          mapInstanceRef.current.fitBounds(bounds);
+          // Prevent excessive zoom if all markers are very close
+          if (mapInstanceRef.current.getZoom() > 15) {
+            mapInstanceRef.current.setZoom(15);
+            console.log("MapPage: Adjusted zoom to prevent excessive close-up.");
+          }
         }
       } else if (mapInstanceRef.current) {
         // If no valid coords, revert to default world view
         mapInstanceRef.current.setCenter({ lat: 0, lng: 0 });
         mapInstanceRef.current.setZoom(2);
+        console.log("MapPage: No valid coordinates found, setting to default world view.");
       }
     }
   }, [mapLoadingStatus, dataLoadingStatus, creations, createMarkerContent]); // Re-run if any of these states change
