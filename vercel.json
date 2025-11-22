@@ -4,7 +4,7 @@
   "outputDirectory": "public",
   "functions": {
     "api/creations.ts": {
-      "runtime": "nodejs22.x"
+      "runtime": "nodejs2o.x"
     }
   },
   "routes": [
