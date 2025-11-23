@@ -2,7 +2,7 @@ import { GoogleGenAI, Modality, GenerateContentResponse } from "@google/genai";
 import { GenerateImageResponse } from "../types";
 
 const GEMINI_IMAGE_MODEL = 'models/gemini-2.5-flash-image';
-const GEMINI_TEXT_MODEL = 'models/gemini-2.5-flash';
+const GEMINI_TEXT_MODEL = 'models/gemini-flash-latest';
 
 /**
  * Generates a monument image by combining two prompts using the Gemini API.
