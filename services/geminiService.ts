@@ -1,9 +1,8 @@
 import { GoogleGenAI, Modality, GenerateContentResponse } from "@google/genai";
 import { GenerateImageResponse } from "../types";
 
-const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
-// Using a text model for extracting location, typically a fast one like flash
-const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
+const GEMINI_IMAGE_MODEL = 'models/gemini-2.5-flash-image';
+const GEMINI_TEXT_MODEL = 'models/gemini-2.5-flash';
 
 /**
  * Generates a monument image by combining two prompts using the Gemini API.
