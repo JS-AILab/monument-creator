@@ -47,10 +47,22 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         return res.end();
       }
 
+      // Convert latitude and longitude to numbers explicitly
+      const lat = Number(latitude);
+      const lng = Number(longitude);
+
+      // Validate that they converted properly
+      if (isNaN(lat) || isNaN(lng)) {
+        res.statusCode = 400;
+        res.write(JSON.stringify({ error: 'Invalid latitude or longitude values. Must be valid numbers.' }));
+        return res.end();
+      }
+
       // Insert the new creation into the database with latitude and longitude
+      // Using CAST to ensure PostgreSQL treats them as REAL (float) types
       const result = await currentPool.query(
-        'INSERT INTO creations(monument_prompt, scene_prompt, image_url, latitude, longitude) VALUES($1, $2, $3, $4, $5) RETURNING id, monument_prompt, scene_prompt, image_url, latitude, longitude, created_at',
-        [monumentPrompt, scenePrompt, imageUrl, latitude, longitude]
+        'INSERT INTO creations(monument_prompt, scene_prompt, image_url, latitude, longitude) VALUES($1, $2, $3, CAST($4 AS REAL), CAST($5 AS REAL)) RETURNING id, monument_prompt, scene_prompt, image_url, CAST(latitude AS REAL) as latitude, CAST(longitude AS REAL) as longitude, created_at',
+        [monumentPrompt, scenePrompt, imageUrl, lat, lng]
       );
       // Return the newly created record
       res.statusCode = 201;
@@ -59,8 +71,9 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     } else if (req.method === 'GET') {
       // Handle retrieving all creations
       // Fetch all creations, ordered by creation date (newest first), including latitude and longitude
+      // Explicitly CAST latitude and longitude to REAL (float) to ensure they are returned as numbers by pg driver
       const result = await currentPool.query(
-        'SELECT id, monument_prompt, scene_prompt, image_url, latitude, longitude, created_at FROM creations ORDER BY created_at DESC'
+        'SELECT id, monument_prompt, scene_prompt, image_url, CAST(latitude AS REAL) AS latitude, CAST(longitude AS REAL) AS longitude, created_at FROM creations ORDER BY created_at DESC'
       );
       // Return the list of creations
       res.statusCode = 200;
