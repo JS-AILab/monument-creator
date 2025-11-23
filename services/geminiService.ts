@@ -81,48 +81,70 @@ export async function extractLocationFromPrompt(
   const apiKey = process.env.API_KEY;
 
   if (!apiKey) {
+    console.error("API_KEY not configured for location extraction");
     throw new Error(
       "Google Gemini API Key is not configured. Please ensure your 'API_KEY' " +
       "environment variable is set correctly in your deployment environment (e.g., Vercel)."
     );
   }
 
+  console.log("Extracting location with API_KEY:", apiKey ? "Present" : "Missing");
+
   const ai = new GoogleGenAI({ apiKey: apiKey });
 
-  const combinedPrompt = `From the following text, strictly identify and return the single most prominent real-world geographic location (city, country, landmark, region, etc.) mentioned or strongly implied.
-  If multiple locations are present, pick the one most relevant to the "scene".
-  If no clear real-world geographic location is found or implied, explicitly return ONLY the string "Generic World Location".
-  Do NOT return fictional places or general descriptors like "forest," "mountain," "city," unless they are part of a specific named location (e.g., "Black Forest, Germany").
-  Return the location name only. Do NOT add any other text, explanations, or punctuation.
-  Text: "A monument described as '${monumentPrompt}' in a scene of '${scenePrompt}'."`;
+  // Improved prompt with more explicit instructions
+  const combinedPrompt = `Extract the geographic location from this text and return ONLY the location name.
+
+Text: "A monument described as '${monumentPrompt}' in a scene of '${scenePrompt}'."
+
+Rules:
+1. Return the most specific real-world geographic location mentioned (city, landmark, state/province, country)
+2. Format: "City, State/Province, Country" or "Landmark, City, Country" (as specific as possible)
+3. If multiple locations, choose the one most relevant to the scene
+4. If NO real-world location is found, return exactly: "Generic World Location"
+5. Do NOT include quotes, explanations, or extra text
+6. Examples of GOOD responses: "Atlanta, Georgia, United States" or "Piedmont Park, Atlanta, Georgia" or "Paris, France"
+
+Location:`;
 
   try {
+    console.log("Calling Gemini API for location extraction...");
+    
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: GEMINI_TEXT_MODEL,
       contents: {
         parts: [{ text: combinedPrompt }],
       },
       config: {
-        maxOutputTokens: 50, // Limit output to just the location name
-        temperature: 0.1, // Keep temperature low for factual extraction
+        maxOutputTokens: 100, // Increased from 50 to allow fuller location names
+        temperature: 0.2, // Keep temperature low for factual extraction
       },
     });
 
+    console.log("Gemini response received:", response);
+    console.log("Response text:", response.text);
+
     const extractedText = response.text?.trim();
 
-    if (extractedText) {
-      // Basic cleanup and validation
-      const cleanedLocation = extractedText.replace(/['".]/g, '').trim();
-      if (cleanedLocation === "Generic World Location") {
-        return "Generic World Location";
-      }
-      return cleanedLocation;
-    } else {
-      console.warn("Gemini API returned no text for location extraction. Defaulting to 'Generic World Location'.");
+    if (!extractedText) {
+      console.warn("Gemini API returned no text for location extraction. Full response:", JSON.stringify(response, null, 2));
       return "Generic World Location";
     }
+
+    // Basic cleanup and validation
+    const cleanedLocation = extractedText.replace(/^["']|["']$/g, '').trim(); // Remove leading/trailing quotes only
+    
+    console.log("Extracted location after cleanup:", cleanedLocation);
+
+    if (cleanedLocation === "Generic World Location" || cleanedLocation === "") {
+      return "Generic World Location";
+    }
+    
+    return cleanedLocation;
+    
   } catch (error) {
     console.error("Error extracting location with Gemini:", error);
+    console.error("Error details:", error instanceof Error ? error.message : String(error));
     // Fallback to generic if API call itself fails
     return "Generic World Location";
   }
