@@ -115,7 +115,7 @@ Location:`;
         parts: [{ text: combinedPrompt }],
       },
       config: {
-        maxOutputTokens: 100, // Increased from 50 to allow fuller location names
+        maxOutputTokens: 500, // Increased from 50 to allow fuller location names
         temperature: 0.2, // Keep temperature low for factual extraction
       },
     });
