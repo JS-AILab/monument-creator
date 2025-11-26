@@ -2,7 +2,7 @@ import { Creation } from '../types'; // Import updated Creation interface
 
 /**
  * Sends a new monument creation to the backend API for storage.
- * @param data An object containing the monument prompt, scene prompt, generated image URL, latitude, and longitude.
+ * @param data An object containing the monument prompt, scene prompt, generated image URL, latitude, longitude, and reCAPTCHA token.
  * @returns A promise that resolves to the newly created Creation object from the database.
  * @throws An error if the API call fails.
  */
@@ -10,8 +10,9 @@ export async function saveCreation(data: {
   monumentPrompt: string;
   scenePrompt: string;
   imageUrl: string;
-  latitude: number; // Added latitude
-  longitude: number; // Added longitude
+  latitude: number;
+  longitude: number;
+  recaptchaToken: string; // Added reCAPTCHA token
 }): Promise<Creation> {
   const response = await fetch('/api/creations', {
     method: 'POST',
@@ -31,6 +32,8 @@ export async function saveCreation(data: {
       console.error('Failed to parse error response:', parseError, 'Raw text:', rawText);
       throw new Error(`Failed to save creation. Server responded with malformed JSON: ${rawText}`);
     }
+    
+    // Throw with the specific error message from the server (includes rate limit messages)
     throw new Error(errorData.error || 'Failed to save creation to the backend.');
   }
 
