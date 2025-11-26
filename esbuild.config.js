@@ -43,7 +43,8 @@ esbuild.build({
   // Define environment variables for client-side code
   define: {
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || ''),
-    'process.env.GOOGLE_MAPS_API_KEY': JSON.stringify(process.env.GOOGLE_MAPS_API_KEY || ''), // Define Google Maps API Key
+    'process.env.GOOGLE_MAPS_API_KEY': JSON.stringify(process.env.GOOGLE_MAPS_API_KEY || ''),
+    'process.env.RECAPTCHA_SITE_KEY': JSON.stringify(process.env.RECAPTCHA_SITE_KEY || ''), // Added reCAPTCHA Site Key
   },
   // Mark these imports as external, relying on the importmap in index.html
   external: ['react', 'react-dom', 'react-dom/client', '@google/genai', 'react/jsx-runtime'],
