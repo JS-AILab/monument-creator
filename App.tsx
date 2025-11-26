@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { generateMonumentImage, extractLocationFromPrompt } from './services/geminiService'; // Import extractLocationFromPrompt
+import React, { useState, useCallback, useEffect } from 'react';
+import { generateMonumentImage, extractLocationFromPrompt } from './services/geminiService';
 import { APIStatus } from './types';
 import { saveCreation } from './services/apiService';
 
@@ -8,17 +8,101 @@ interface AppProps {
   onNavigateToMap: () => void; // Callback to navigate to the Map Page
 }
 
+// Declare grecaptcha on window for TypeScript
+declare global {
+  interface Window {
+    grecaptcha: {
+      ready: (callback: () => void) => void;
+      execute: (siteKey: string, options: { action: string }) => Promise<string>;
+    };
+  }
+}
+
 const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
   const [monumentPrompt, setMonumentPrompt] = useState<string>('');
   const [scenePrompt, setScenePrompt] = useState<string>('');
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<APIStatus>(APIStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
-
-  // New state for location feedback
   const [locationFeedback, setLocationFeedback] = useState<string | null>(null);
-
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [recaptchaLoaded, setRecaptchaLoaded] = useState<boolean>(false);
+
+  // Get reCAPTCHA site key from environment
+  const RECAPTCHA_SITE_KEY = process.env.RECAPTCHA_SITE_KEY;
+
+  // Load reCAPTCHA script
+  useEffect(() => {
+    if (!RECAPTCHA_SITE_KEY) {
+      console.error('RECAPTCHA_SITE_KEY not configured');
+      return;
+    }
+
+    // Check if script already loaded
+    if (window.grecaptcha) {
+      setRecaptchaLoaded(true);
+      return;
+    }
+
+    // Load reCAPTCHA v3 script
+    const script = document.createElement('script');
+    script.src = `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
+    script.async = true;
+    script.defer = true;
+    
+    script.onload = () => {
+      console.log('reCAPTCHA script loaded successfully');
+      setRecaptchaLoaded(true);
+    };
+    
+    script.onerror = () => {
+      console.error('Failed to load reCAPTCHA script');
+      setError('Failed to load bot protection. Please refresh the page.');
+    };
+
+    document.head.appendChild(script);
+
+    return () => {
+      // Cleanup: remove script if component unmounts
+      const existingScript = document.querySelector(`script[src*="recaptcha"]`);
+      if (existingScript) {
+        existingScript.remove();
+      }
+    };
+  }, [RECAPTCHA_SITE_KEY]);
+
+  // Helper function to get reCAPTCHA token
+  const getRecaptchaToken = async (): Promise<string | null> => {
+    if (!RECAPTCHA_SITE_KEY) {
+      console.error('RECAPTCHA_SITE_KEY not configured');
+      return null;
+    }
+
+    if (!window.grecaptcha) {
+      console.error('grecaptcha not loaded');
+      setError('Bot protection not loaded. Please refresh the page.');
+      return null;
+    }
+
+    try {
+      return await new Promise<string>((resolve, reject) => {
+        window.grecaptcha.ready(async () => {
+          try {
+            const token = await window.grecaptcha.execute(RECAPTCHA_SITE_KEY!, { 
+              action: 'create_monument' 
+            });
+            resolve(token);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+    } catch (err) {
+      console.error('Error getting reCAPTCHA token:', err);
+      setError('Bot protection failed. Please try again.');
+      return null;
+    }
+  };
 
   // Helper function to render error messages consistently
   const renderError = (message: string | null) => {
@@ -37,26 +121,44 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
   const handleGenerate = useCallback(async () => {
     setError(null);
     setGeneratedImageUrl(null);
-    setLocationFeedback(null); // Clear previous location feedback
+    setLocationFeedback(null);
 
     if (!monumentPrompt || !scenePrompt) {
       setError('Please enter both monument and scene descriptions.');
       return;
     }
 
+    if (!recaptchaLoaded) {
+      setError('Bot protection still loading. Please wait a moment and try again.');
+      return;
+    }
+
     setApiStatus(APIStatus.LOADING);
+    
     try {
+      // Get reCAPTCHA token first
+      console.log('Getting reCAPTCHA token...');
+      const recaptchaToken = await getRecaptchaToken();
+      
+      if (!recaptchaToken) {
+        throw new Error('Failed to verify you are human. Please refresh and try again.');
+      }
+
+      console.log('reCAPTCHA token obtained successfully');
+
       // 1. Generate the image first
+      console.log('Generating monument image...');
       const imageResponse = await generateMonumentImage(monumentPrompt, scenePrompt);
       const newImageUrl = `data:${imageResponse.mimeType};base64,${imageResponse.base64ImageData}`;
       setGeneratedImageUrl(newImageUrl);
 
       // 2. Extract location using Gemini
-      let derivedLocationString = "Generic World Location"; // Default fallback
+      let derivedLocationString = "Generic World Location";
       let latitude: number = 0.0;
       let longitude: number = 0.0;
 
       try {
+        console.log('Extracting location...');
         derivedLocationString = await extractLocationFromPrompt(monumentPrompt, scenePrompt);
         setLocationFeedback(`Gemini inferred location: "${derivedLocationString}"`);
 
@@ -92,22 +194,33 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
       } catch (locationErr) {
         console.error('Error in location derivation (Gemini or Geocoding):', locationErr);
         setLocationFeedback("Failed to derive location from prompts. Pinning at generic world location (Null Island).");
-        // Lat/Lng remain 0,0 from initialization
       }
 
       // 4. Save the generated image and derived location to the database
+      console.log('Saving creation to database...');
       setIsSaving(true);
+      
       try {
         await saveCreation({
           monumentPrompt,
           scenePrompt,
           imageUrl: newImageUrl,
-          latitude, // Derived latitude
-          longitude, // Derived longitude
+          latitude,
+          longitude,
+          recaptchaToken, // Include reCAPTCHA token
         });
-      } catch (saveErr) {
+        console.log('Monument saved successfully');
+      } catch (saveErr: any) {
         console.error('Failed to save creation to database:', saveErr);
-        setError(`Failed to save this creation to history: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`);
+        
+        // Handle rate limit errors specially
+        if (saveErr.message && saveErr.message.includes('Rate limit')) {
+          setError(saveErr.message);
+        } else if (saveErr.message && saveErr.message.includes('Bot detection')) {
+          setError('Bot detection failed. Please try again. If this persists, try refreshing the page.');
+        } else {
+          setError(`Failed to save this creation: ${saveErr.message || String(saveErr)}`);
+        }
       } finally {
         setIsSaving(false);
       }
@@ -120,7 +233,7 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
       setError(`${errorMessage}`);
       setApiStatus(APIStatus.ERROR);
     }
-  }, [monumentPrompt, scenePrompt]);
+  }, [monumentPrompt, scenePrompt, recaptchaLoaded, RECAPTCHA_SITE_KEY]);
 
   const handleShare = useCallback(async () => {
     if (generatedImageUrl && navigator.share) {
@@ -146,7 +259,6 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
     }
   }, [generatedImageUrl, monumentPrompt, scenePrompt]);
 
-
   return (
     <div className="container mx-auto p-4 md:p-8 max-w-4xl bg-white rounded-xl shadow-2xl border border-blue-100 relative">
       {/* Header and View Map button */}
@@ -163,7 +275,7 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
         </button>
       </div>
 
-      <div className="pt-20 space-y-6 mb-8"> {/* Added padding top to account for header */}
+      <div className="pt-20 space-y-6 mb-8">
         {renderError(error)}
 
         <div>
@@ -198,12 +310,11 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
           ></textarea>
         </div>
 
-        {/* Removed Geolocation Input Section - location is now derived from prompts */}
-
         <button
           onClick={handleGenerate}
-          disabled={apiStatus === APIStatus.LOADING || !monumentPrompt || !scenePrompt}
+          disabled={apiStatus === APIStatus.LOADING || !monumentPrompt || !scenePrompt || !recaptchaLoaded}
           className="w-full py-3 px-6 bg-[#4285F4] text-white font-bold rounded-lg shadow-lg hover:bg-[#346dc9] focus:outline-none focus:ring-4 focus:ring-[#a0c3ff] transition-all duration-300 transform active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+          title={!recaptchaLoaded ? 'Loading bot protection...' : ''}
         >
           {apiStatus === APIStatus.LOADING ? (
             <>
@@ -213,10 +324,25 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
               </svg>
               Generating Monument & Locating...
             </>
+          ) : !recaptchaLoaded ? (
+            'Loading bot protection...'
           ) : (
             'Generate Monument Image'
           )}
         </button>
+
+        {/* reCAPTCHA badge notice */}
+        <p className="text-xs text-gray-500 text-center">
+          This site is protected by reCAPTCHA and the Google{' '}
+          <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+            Privacy Policy
+          </a>{' '}
+          and{' '}
+          <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+            Terms of Service
+          </a>{' '}
+          apply.
+        </p>
       </div>
 
       {generatedImageUrl && (
@@ -260,7 +386,7 @@ const App: React.FC<AppProps> = ({ onNavigateToMap }) => {
               aria-label="Share generated image"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.832-1.664l-4.94-2.47a3.027 3 0 000-.629l4.94-2.47C13.856 7.638 14.123 8 15 8z" />
+                <path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.832-1.664l-4.94-2.47a3.027 3.027 0 000-.629l4.94-2.47C13.856 7.638 14.123 8 15 8z" />
               </svg>
               Share
             </button>
