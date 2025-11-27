@@ -20,6 +20,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
   const [error, setError] = useState<string | null>(null);
 
   // Retrieve API key from environment variables
+  // IMPORTANT: Ensure GOOGLE_MAPS_API_KEY is set in your Vercel project settings (and locally)
   const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
   // Helper function to render error messages consistently
@@ -36,109 +37,17 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
     );
   };
 
-  // Helper function to group monuments by location
-  const groupMonumentsByLocation = useCallback((monuments: Creation[]) => {
-    const grouped = new Map<string, Creation[]>();
-    
-    monuments.forEach(monument => {
-      // Round to 4 decimal places to group nearby monuments (about 11 meters accuracy)
-      const key = `${monument.latitude.toFixed(4)},${monument.longitude.toFixed(4)}`;
-      
-      if (!grouped.has(key)) {
-        grouped.set(key, []);
-      }
-      grouped.get(key)!.push(monument);
-    });
-    
-    return grouped;
-  }, []);
-
-  // Memoized function to create marker content for multiple monuments
-  const createMarkerContent = useCallback((monuments: Creation[]) => {
-    if (monuments.length === 1) {
-      // Single monument - simple view
-      const creation = monuments[0];
-      return `
-        <div class="info-window p-3 max-w-xs">
-          <h3 class="font-bold text-lg mb-1">${creation.monument_prompt}</h3>
-          <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
-          <img src="${creation.image_url}" alt="${creation.monument_prompt}" class="w-full h-auto rounded shadow-md object-cover mb-2" />
-          <p class="text-xs text-gray-500">${new Date(creation.created_at).toLocaleString()}</p>
-          <a href="${creation.image_url}" download="monument-${creation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>
-        </div>
-      `;
-    } else {
-      // Multiple monuments - carousel view
-      const monumentsHtml = monuments.map((creation, index) => `
-        <div class="monument-slide" data-index="${index}" style="display: ${index === 0 ? 'block' : 'none'}">
-          <h3 class="font-bold text-lg mb-1">${creation.monument_prompt}</h3>
-          <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
-          <img src="${creation.image_url}" alt="${creation.monument_prompt}" class="w-full h-auto rounded shadow-md object-cover mb-2" />
-          <p class="text-xs text-gray-500">${new Date(creation.created_at).toLocaleString()}</p>
-          <a href="${creation.image_url}" download="monument-${creation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>
-        </div>
-      `).join('');
-
-      return `
-        <div class="info-window p-3 max-w-xs">
-          <div class="flex justify-between items-center mb-2">
-            <span class="text-sm font-semibold text-gray-700">
-              <span id="current-index">1</span> of ${monuments.length} monuments here
-            </span>
-          </div>
-          <div id="carousel-container">
-            ${monumentsHtml}
-          </div>
-          <div class="flex justify-between mt-3">
-            <button id="prev-btn" class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
-              ← Previous
-            </button>
-            <button id="next-btn" class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
-              Next →
-            </button>
-          </div>
-        </div>
-      `;
-    }
-  }, []);
-
-  // Function to setup carousel controls
-  const setupCarouselControls = useCallback((monuments: Creation[]) => {
-    if (monuments.length <= 1) return;
-
-    let currentIndex = 0;
-
-    const updateDisplay = () => {
-      const slides = document.querySelectorAll('.monument-slide');
-      const indexDisplay = document.getElementById('current-index');
-      
-      slides.forEach((slide, index) => {
-        (slide as HTMLElement).style.display = index === currentIndex ? 'block' : 'none';
-      });
-      
-      if (indexDisplay) {
-        indexDisplay.textContent = String(currentIndex + 1);
-      }
-    };
-
-    const prevBtn = document.getElementById('prev-btn');
-    const nextBtn = document.getElementById('next-btn');
-
-    if (prevBtn) {
-      prevBtn.onclick = (e) => {
-        e.stopPropagation();
-        currentIndex = (currentIndex - 1 + monuments.length) % monuments.length;
-        updateDisplay();
-      };
-    }
-
-    if (nextBtn) {
-      nextBtn.onclick = (e) => {
-        e.stopPropagation();
-        currentIndex = (currentIndex + 1) % monuments.length;
-        updateDisplay();
-      };
-    }
+  // Memoized function to create marker content for the InfoWindow
+  const createMarkerContent = useCallback((creation: Creation) => {
+    return `
+      <div class="info-window p-2">
+        <h3 class="font-bold text-md mb-1">${creation.monument_prompt}</h3>
+        <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
+        <img src="${creation.image_url}" alt="${creation.monument_prompt}" class="w-48 h-auto rounded shadow-md object-cover" />
+        <p class="text-xs text-gray-500 mt-2">${new Date(creation.created_at).toLocaleString()}</p>
+        <a href="${creation.image_url}" download="monument-${creation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>
+      </div>
+    `;
   }, []);
 
   // Effect to load Google Maps script dynamically
@@ -146,7 +55,17 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
     console.log("MapPage (render): GOOGLE_MAPS_API_KEY:", GOOGLE_MAPS_API_KEY ? "Present" : "Missing");
     console.log("MapPage: useEffect for Google Maps script load. Status:", getGoogleMapsScriptStatus());
     
-    if (getGoogleMapsScriptStatus() === APIStatus.IDLE || getGoogleMapsScriptStatus() === APIStatus.ERROR) {
+    const currentStatus = getGoogleMapsScriptStatus();
+    
+    // If already loaded successfully, just update local state
+    if (currentStatus === APIStatus.SUCCESS) {
+      console.log("MapPage: Google Maps already loaded, updating state");
+      setMapLoadingStatus(APIStatus.SUCCESS);
+      return;
+    }
+    
+    // Only attempt to load if not already loading or loaded, and API Key is present
+    if (currentStatus === APIStatus.IDLE || currentStatus === APIStatus.ERROR) {
       if (!GOOGLE_MAPS_API_KEY) {
         setMapLoadingStatus(APIStatus.ERROR);
         setError("Google Maps API Key is missing. Please set 'GOOGLE_MAPS_API_KEY' environment variable.");
@@ -158,7 +77,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
       loadGoogleMapsScript(GOOGLE_MAPS_API_KEY)
         .then(() => {
           setMapLoadingStatus(APIStatus.SUCCESS);
-          setError(null);
+          setError(null); // Clear map-related errors if successful
           console.log("MapPage: Google Maps script loaded successfully.");
         })
         .catch((err) => {
@@ -167,45 +86,31 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
           console.error('MapPage: Map script load error:', err);
         });
     }
-  }, [GOOGLE_MAPS_API_KEY]);
+  }, [GOOGLE_MAPS_API_KEY]); // Dependency on API key to re-trigger if it changes
 
   // Effect to fetch creations data
   useEffect(() => {
     console.log("MapPage: useEffect for fetching creations data.");
     setDataLoadingStatus(APIStatus.LOADING);
-    
     getCreations()
       .then((data) => {
-        console.log("MapPage: Raw data received:", data);
-        console.log("MapPage: Number of creations:", data.length);
-        
-        data.forEach((creation, index) => {
-          console.log(`Creation ${index}:`, {
-            id: creation.id,
-            monument: creation.monument_prompt,
-            lat: creation.latitude,
-            lng: creation.longitude,
-            latType: typeof creation.latitude,
-            lngType: typeof creation.longitude,
-          });
-        });
-        
         setCreations(data);
         setDataLoadingStatus(APIStatus.SUCCESS);
-        setError(null);
+        setError(null); // Clear data-related errors if successful
         console.log("MapPage: Creations data fetched successfully:", data);
       })
       .catch((err) => {
-        console.error('MapPage: Full error object:', err);
         setDataLoadingStatus(APIStatus.ERROR);
         setError(`Failed to load monuments: ${err instanceof Error ? err.message : String(err)}`);
+        console.error('MapPage: Fetch creations error:', err);
       });
-  }, []);
+  }, []); // Run only once on mount to fetch all creations
 
-  // Effect to initialize map and place markers
+  // Effect to initialize map and place markers once both map script and data are ready
   useEffect(() => {
-    console.log("MapPage: useEffect for map init/marker placement. Map status:", mapLoadingStatus, "Data status:", dataLoadingStatus);
+    console.log("MapPage: useEffect for map init/marker placement. Map status:", mapLoadingStatus, "Data status:", dataLoadingStatus, "MapRef:", mapRef.current);
     
+    // Only proceed if map script and data are loaded successfully, and mapRef is attached to a DOM element
     if (mapLoadingStatus === APIStatus.SUCCESS && dataLoadingStatus === APIStatus.SUCCESS && mapRef.current) {
       if (!window.google || !window.google.maps) {
         setError("Google Maps API object not found after script load.");
@@ -213,132 +118,118 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
         console.error("MapPage: window.google.maps not found after SUCCESS status.");
         return;
       }
+      console.log("MapPage: window.google.maps is available.");
 
       // Initialize the map if it hasn't been already
       if (!mapInstanceRef.current) {
-        const defaultLatLng = { lat: 0, lng: 0 };
+        const defaultLatLng = { lat: 0, lng: 0 }; // Default to center of the world
         mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
           center: defaultLatLng,
-          zoom: 2,
-          minZoom: 2,
-          maxZoom: 18,
+          zoom: 2, // World view zoom
+          minZoom: 2, // Prevent zooming out too far
+          maxZoom: 18, // Prevent zooming in too close
           streetViewControl: false,
           mapTypeControl: false,
           fullscreenControl: false,
         });
 
-        infoWindowRef.current = new window.google.maps.InfoWindow();
+        infoWindowRef.current = new window.google.maps.InfoWindow(); // Initialize info window
         console.log("MapPage: Google Map instance initialized.");
+      } else {
+        console.log("MapPage: Google Map instance already exists.");
       }
 
-      // Clear existing markers
+      // Fix: Clear all existing markers before adding new ones
       if (markersRef.current.length > 0) {
         markersRef.current.forEach((marker) => marker.setMap(null));
-        markersRef.current = [];
-        console.log("MapPage: Cleared existing markers.");
+        markersRef.current = []; // Clear the array
+        console.log("MapPage: Cleared existing markers. Count:", markersRef.current.length);
+      } else {
+        console.log("MapPage: No existing markers to clear.");
       }
-
-      // Group monuments by location
-      const groupedMonuments = groupMonumentsByLocation(creations);
-      console.log(`MapPage: Grouped ${creations.length} monuments into ${groupedMonuments.size} locations`);
 
       const bounds = new window.google.maps.LatLngBounds();
       let hasValidCoords = false;
-      let markerCount = 0;
+      let validCreations = 0;
+      let allValidCoordsAreNullIsland = true; // Track if all valid coords are 0,0
 
-      // Create markers for each location group
-      groupedMonuments.forEach((monuments, locationKey) => {
-        const firstMonument = monuments[0];
-        
-        if (typeof firstMonument.latitude === 'number' && 
-            typeof firstMonument.longitude === 'number' && 
-            !isNaN(firstMonument.latitude) && 
-            !isNaN(firstMonument.longitude) && 
-            mapInstanceRef.current) {
-          
+      creations.forEach(creation => {
+        // Ensure creation has valid latitude and longitude numbers
+        if (typeof creation.latitude === 'number' && typeof creation.longitude === 'number' && mapInstanceRef.current) {
           hasValidCoords = true;
-          const position = { lat: firstMonument.latitude, lng: firstMonument.longitude };
-          
-          console.log(`MapPage: Creating marker at (${position.lat}, ${position.lng}) for ${monuments.length} monument(s)`);
+          validCreations++;
+          const position = { lat: creation.latitude, lng: creation.longitude };
 
-          // Create custom label for multiple monuments
-          const label = monuments.length > 1 ? {
-            text: String(monuments.length),
-            color: 'white',
-            fontSize: '14px',
-            fontWeight: 'bold'
-          } : undefined;
+          if (position.lat !== 0 || position.lng !== 0) {
+            allValidCoordsAreNullIsland = false; // Found a non-Null Island coordinate
+          }
+          
+          console.log(`MapPage: Attempting to place marker for "${creation.monument_prompt}" at Lat: ${position.lat}, Lng: ${position.lng}`);
 
           const marker = new window.google.maps.Marker({
             position: position,
-            map: mapInstanceRef.current,
-            title: monuments.length > 1 
-              ? `${monuments.length} monuments at this location` 
-              : firstMonument.monument_prompt,
-            animation: window.google.maps.Animation.DROP,
-            label: label,
+            map: mapInstanceRef.current, // Assign marker to the map instance
+            title: creation.monument_prompt,
+            animation: window.google.maps.Animation.DROP, // Drop animation on load
           });
 
+          // Store marker reference for potential clearing later
           markersRef.current.push(marker);
-          markerCount++;
 
-          // Add click listener
+          // Add click listener to show info window
           marker.addListener('click', () => {
             if (infoWindowRef.current && mapInstanceRef.current) {
-              infoWindowRef.current.setContent(createMarkerContent(monuments));
+              infoWindowRef.current.setContent(createMarkerContent(creation));
               infoWindowRef.current.open(mapInstanceRef.current, marker);
-              
-              // Setup carousel controls after info window opens
-              setTimeout(() => setupCarouselControls(monuments), 100);
-              
-              console.log(`MapPage: Info window opened for ${monuments.length} monument(s)`);
+              console.log("MapPage: Info window opened for marker.");
             }
           });
-
-          bounds.extend(position);
+          bounds.extend(position); // Extend bounds to include this marker
+          console.log(`MapPage: Marker for "${creation.monument_prompt}" placed.`);
+        } else {
+          console.warn(`MapPage: Skipping marker for creation ID ${creation.id} due to invalid coordinates.`);
         }
       });
+      console.log(`MapPage: Finished processing ${creations.length} creations. Placed ${validCreations} markers.`);
 
-      console.log(`MapPage: Created ${markerCount} markers for ${creations.length} monuments`);
-
-      // Adjust map view
+      // Adjust map bounds to fit all markers if there are any valid coordinates
       if (hasValidCoords && mapInstanceRef.current) {
-        if (markerCount === 1) {
-          // Single marker - center on it with reasonable zoom
-          const firstPosition = markersRef.current[0].getPosition();
-          if (firstPosition) {
-            mapInstanceRef.current.setCenter(firstPosition);
-            mapInstanceRef.current.setZoom(firstPosition.lat() === 0 && firstPosition.lng() === 0 ? 8 : 12);
-          }
+        if (allValidCoordsAreNullIsland && validCreations > 0) {
+          // If all valid points are at 0,0, set a reasonable default zoom to make them visible
+          mapInstanceRef.current.setCenter({ lat: 0, lng: 0 });
+          mapInstanceRef.current.setZoom(8); // Zoom level to see Null Island clearly
+          console.log("MapPage: All valid markers at Null Island, setting center to 0,0 and zoom to 8.");
         } else {
-          // Multiple markers - fit bounds
           mapInstanceRef.current.fitBounds(bounds);
-          const currentZoom = mapInstanceRef.current.getZoom();
-          if (currentZoom && currentZoom > 15) {
+          // Prevent excessive zoom if all markers are very close
+          if (mapInstanceRef.current.getZoom() > 15) {
             mapInstanceRef.current.setZoom(15);
+            console.log("MapPage: Adjusted zoom to prevent excessive close-up (over 15).");
           }
         }
       } else if (mapInstanceRef.current) {
+        // If no valid coords, revert to default world view
         mapInstanceRef.current.setCenter({ lat: 0, lng: 0 });
         mapInstanceRef.current.setZoom(2);
-        console.log("MapPage: No valid coordinates, default world view.");
+        console.log("MapPage: No valid coordinates found, setting to default world view (zoom 2).");
       }
     }
-  }, [mapLoadingStatus, dataLoadingStatus, creations, createMarkerContent, setupCarouselControls, groupMonumentsByLocation]);
+  }, [mapLoadingStatus, dataLoadingStatus, creations, createMarkerContent]); // Re-run if any of these states change
 
+  // Determine overall loading and error states for the UI
   const isLoading = mapLoadingStatus === APIStatus.LOADING || dataLoadingStatus === APIStatus.LOADING;
   const hasError = mapLoadingStatus === APIStatus.ERROR || dataLoadingStatus === APIStatus.ERROR || error;
 
   return (
     <div className="relative w-full h-screen flex flex-col">
-      {/* Header */}
+      {/* Header and Create Monument button */}
       <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-white bg-opacity-90 shadow-md flex justify-between items-center">
         <h1 className="text-2xl md:text-3xl font-extrabold text-[#1a73e8]">
-          Monument Map {creations.length > 0 && `(${creations.length} monuments)`}
+          Monument Map
         </h1>
         <button
           onClick={onNavigateToCreate}
-          className="py-2 px-4 bg-[#4285F4] text-white font-bold rounded-lg shadow-lg hover:bg-[#346dc9] focus:outline-none focus:ring-4 focus:ring-[#a0c3ff] transition-all duration-300 transform active:scale-98"
+          className="py-2 px-4 bg-[#4285F4] text-white font-bold rounded-lg shadow-lg hover:bg-[#346dc9] focus:outline-none focus:ring-4 focus:ring-[#a0c3ff] transition-all duration-300 transform active:scale-98 disabled:opacity-50"
           aria-label="Create a new monument"
         >
           Create Monument
@@ -361,8 +252,13 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
               )}
               {hasError && (
                 <>
-                  <p className="text-xl font-bold mb-2">Failed to Load</p>
-                  {renderError(error)}
+                  <p className="text-xl font-bold mb-2">Failed to Load Map or Data</p>
+                  {renderError(error || "An unknown error occurred.")}
+                  {!GOOGLE_MAPS_API_KEY && ( // Specific warning if API key is missing
+                    <p className="mt-4 text-orange-300">
+                      **Warning:** Google Maps API Key is missing. Please set `GOOGLE_MAPS_API_KEY` environment variable.
+                    </p>
+                  )}
                 </>
               )}
             </div>
