@@ -39,15 +39,50 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
 
   // Memoized function to create marker content for the InfoWindow
   const createMarkerContent = useCallback((creation: Creation) => {
-    return `
-      <div class="info-window p-2">
-        <h3 class="font-bold text-md mb-1">${creation.monument_prompt}</h3>
-        <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
-        <img src="${creation.image_url}" alt="${creation.monument_prompt}" class="w-48 h-auto rounded shadow-md object-cover" />
-        <p class="text-xs text-gray-500 mt-2">${new Date(creation.created_at).toLocaleString()}</p>
-        <a href="${creation.image_url}" download="monument-${creation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>
-      </div>
-    `;
+    // Check if image is already loaded
+    if (creation.image_url) {
+      return `
+        <div class="info-window p-2">
+          <h3 class="font-bold text-md mb-1">${creation.monument_prompt}</h3>
+          <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
+          <img src="${creation.image_url}" alt="${creation.monument_prompt}" class="w-48 h-auto rounded shadow-md object-cover" />
+          <p class="text-xs text-gray-500 mt-2">${new Date(creation.created_at).toLocaleString()}</p>
+          <a href="${creation.image_url}" download="monument-${creation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>
+        </div>
+      `;
+    } else {
+      // Image not loaded yet - show loading state
+      return `
+        <div class="info-window p-2">
+          <h3 class="font-bold text-md mb-1">${creation.monument_prompt}</h3>
+          <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
+          <div class="w-48 h-32 bg-gray-200 rounded flex items-center justify-center">
+            <p class="text-gray-500 text-sm">Loading image...</p>
+          </div>
+          <p class="text-xs text-gray-500 mt-2">${new Date(creation.created_at).toLocaleString()}</p>
+        </div>
+      `;
+    }
+  }, []);
+
+  // Function to load image for a specific monument
+  const loadMonumentImage = useCallback(async (monumentId: number) => {
+    try {
+      const response = await fetch(`/api/creations?id=${monumentId}`);
+      if (!response.ok) throw new Error('Failed to load monument image');
+      
+      const data = await response.json();
+      
+      // Update the creation in state with the image
+      setCreations(prev => 
+        prev.map(c => c.id === monumentId ? { ...c, image_url: data.image_url } : c)
+      );
+      
+      return data.image_url;
+    } catch (error) {
+      console.error('Error loading monument image:', error);
+      return null;
+    }
   }, []);
 
   // Effect to load Google Maps script dynamically
@@ -177,11 +212,25 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
           markersRef.current.push(marker);
 
           // Add click listener to show info window
-          marker.addListener('click', () => {
+          marker.addListener('click', async () => {
             if (infoWindowRef.current && mapInstanceRef.current) {
+              // Show initial content (with or without image)
               infoWindowRef.current.setContent(createMarkerContent(creation));
               infoWindowRef.current.open(mapInstanceRef.current, marker);
               console.log("MapPage: Info window opened for marker.");
+              
+              // If image not loaded yet, fetch it
+              if (!creation.image_url) {
+                console.log(`MapPage: Loading image for monument ${creation.id}`);
+                const imageUrl = await loadMonumentImage(creation.id);
+                
+                // Update info window with loaded image
+                if (imageUrl && infoWindowRef.current) {
+                  const updatedCreation = { ...creation, image_url: imageUrl };
+                  infoWindowRef.current.setContent(createMarkerContent(updatedCreation));
+                  console.log(`MapPage: Image loaded and info window updated for monument ${creation.id}`);
+                }
+              }
             }
           });
           bounds.extend(position); // Extend bounds to include this marker
@@ -214,7 +263,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
         console.log("MapPage: No valid coordinates found, setting to default world view (zoom 2).");
       }
     }
-  }, [mapLoadingStatus, dataLoadingStatus, creations, createMarkerContent]); // Re-run if any of these states change
+  }, [mapLoadingStatus, dataLoadingStatus, creations, createMarkerContent, loadMonumentImage]); // Re-run if any of these states change
 
   // Determine overall loading and error states for the UI
   const isLoading = mapLoadingStatus === APIStatus.LOADING || dataLoadingStatus === APIStatus.LOADING;
