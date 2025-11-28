@@ -232,9 +232,12 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
             if (infoWindowRef.current && mapInstanceRef.current) {
               console.log("MapPage: Marker clicked for monument ID:", currentCreation.id);
               
+              const map = mapInstanceRef.current;
+              const infoWindow = infoWindowRef.current;
+              
               // Show initial content (with or without image)
-              infoWindowRef.current.setContent(createMarkerContent(currentCreation));
-              infoWindowRef.current.open(mapInstanceRef.current, marker);
+              infoWindow.setContent(createMarkerContent(currentCreation));
+              infoWindow.open(map, marker);
               console.log("MapPage: Info window opened for marker.");
               
               // If image not loaded yet, fetch it
@@ -242,11 +245,18 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
                 console.log(`MapPage: Loading image for monument ${currentCreation.id}`);
                 const imageUrl = await loadMonumentImage(currentCreation.id);
                 
-                // Update info window with loaded image
-                if (imageUrl && infoWindowRef.current) {
+                // Update info window with loaded image IMMEDIATELY after fetch completes
+                if (imageUrl && infoWindow) {
                   const updatedCreation = { ...currentCreation, image_url: imageUrl };
-                  infoWindowRef.current.setContent(createMarkerContent(updatedCreation));
-                  console.log(`MapPage: Image loaded and info window updated for monument ${currentCreation.id}`);
+                  
+                  // Check if this info window is still open before updating
+                  // (user might have closed it or clicked another marker)
+                  if (infoWindow.getMap()) {
+                    infoWindow.setContent(createMarkerContent(updatedCreation));
+                    console.log(`MapPage: Image loaded and info window updated for monument ${currentCreation.id}`);
+                  } else {
+                    console.log(`MapPage: Info window was closed, skipping update`);
+                  }
                 }
               }
             }
