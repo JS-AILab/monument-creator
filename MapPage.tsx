@@ -12,84 +12,36 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-  const markersRef = useRef<google.maps.Marker[]>([]); // Ref to store markers for proper management
+  const markersRef = useRef<google.maps.Marker[]>([]);
 
   const [mapLoadingStatus, setMapLoadingStatus] = useState<APIStatus>(APIStatus.IDLE);
   const [creations, setCreations] = useState<Creation[]>([]);
   const [dataLoadingStatus, setDataLoadingStatus] = useState<APIStatus>(APIStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
 
-  // Retrieve API key from environment variables
-  // IMPORTANT: Ensure GOOGLE_MAPS_API_KEY is set in your Vercel project settings (and locally)
   const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
-  // Helper function to render error messages consistently
+  // Helper function to render error messages
   const renderError = (message: string | null) => {
     if (!message) return null;
     return (
-      <div
-        className="bg-[#fee2e2] border border-[#fca5a5] text-[#dc2626] px-4 py-3 rounded-md relative text-center"
-        role="alert"
-      >
+      <div className="bg-[#fee2e2] border border-[#fca5a5] text-[#dc2626] px-4 py-3 rounded-md relative text-center" role="alert">
         <strong className="font-bold">Error: </strong>
         <span className="block sm:inline">{message}</span>
       </div>
     );
   };
 
-  // Memoized function to create marker content for the InfoWindow
-  const createMarkerContent = useCallback((creation: Creation, loadingId?: string) => {
-    // Check if image is already loaded
-    if (creation.image_url) {
-      return `
-        <div class="info-window p-2">
-          <h3 class="font-bold text-md mb-1">${creation.monument_prompt}</h3>
-          <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
-          <img src="${creation.image_url}" alt="${creation.monument_prompt}" class="w-48 h-auto rounded shadow-md object-cover" />
-          <p class="text-xs text-gray-500 mt-2">${new Date(creation.created_at).toLocaleString()}</p>
-          <a href="${creation.image_url}" download="monument-${creation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>
-        </div>
-      `;
-    } else {
-      // Image not loaded yet - show loading state with unique ID
-      const uniqueId = loadingId || `loading-${creation.id}`;
-      return `
-        <div class="info-window p-2">
-          <h3 class="font-bold text-md mb-1">${creation.monument_prompt}</h3>
-          <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
-          <div id="${uniqueId}" class="w-48 h-32 bg-gray-200 rounded flex items-center justify-center">
-            <p class="text-gray-500 text-sm">Loading image...</p>
-          </div>
-          <p class="text-xs text-gray-500 mt-2">${new Date(creation.created_at).toLocaleString()}</p>
-        </div>
-      `;
-    }
-  }, []);
-
   // Function to load image for a specific monument
   const loadMonumentImage = useCallback(async (monumentId: number) => {
-    console.log(`loadMonumentImage called with ID: ${monumentId}`);
-    
-    if (!monumentId) {
-      console.error('loadMonumentImage: Invalid monument ID:', monumentId);
-      return null;
-    }
-    
+    console.log(`Loading image for monument ${monumentId}...`);
     try {
-      const url = `/api/creations?id=${monumentId}`;
-      console.log(`Fetching monument image from: ${url}`);
-      
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        console.error(`Failed to load monument image. Status: ${response.status}`);
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+      const response = await fetch(`/api/creations?id=${monumentId}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const data = await response.json();
-      console.log(`Monument ${monumentId} data loaded. Has image?`, !!data.image_url);
       
-      // Update the creation in state with the image
+      // Update state
       setCreations(prev => 
         prev.map(c => c.id === monumentId ? { ...c, image_url: data.image_url } : c)
       );
@@ -101,26 +53,160 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
     }
   }, []);
 
-  // Effect to load Google Maps script dynamically
+  // Helper function to group monuments by location
+  const groupMonumentsByLocation = useCallback((monuments: Creation[]) => {
+    const grouped = new Map<string, Creation[]>();
+    
+    monuments.forEach(monument => {
+      const key = `${monument.latitude.toFixed(4)},${monument.longitude.toFixed(4)}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+      }
+      grouped.get(key)!.push(monument);
+    });
+    
+    return grouped;
+  }, []);
+
+  // Create marker content with lazy loading support
+  const createMarkerContent = useCallback((monuments: Creation[], currentIndex: number = 0) => {
+    if (monuments.length === 1) {
+      const creation = monuments[0];
+      const hasImage = !!creation.image_url;
+      
+      return `
+        <div class="info-window p-3 max-w-xs">
+          <h3 class="font-bold text-lg mb-1">${creation.monument_prompt}</h3>
+          <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
+          ${hasImage 
+            ? `<img src="${creation.image_url}" alt="${creation.monument_prompt}" class="w-full h-auto rounded shadow-md object-cover mb-2" />`
+            : `<div id="loading-${creation.id}" class="w-full h-48 bg-gray-200 rounded flex items-center justify-center mb-2"><p class="text-gray-500">Loading image...</p></div>`
+          }
+          <p class="text-xs text-gray-500">${new Date(creation.created_at).toLocaleString()}</p>
+          ${hasImage ? `<a href="${creation.image_url}" download="monument-${creation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>` : ''}
+        </div>
+      `;
+    } else {
+      // Multiple monuments - carousel
+      const monumentsHtml = monuments.map((creation, index) => {
+        const hasImage = !!creation.image_url;
+        return `
+          <div class="monument-slide" data-index="${index}" data-monument-id="${creation.id}" style="display: ${index === currentIndex ? 'block' : 'none'}">
+            <h3 class="font-bold text-lg mb-1">${creation.monument_prompt}</h3>
+            <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
+            ${hasImage 
+              ? `<img src="${creation.image_url}" alt="${creation.monument_prompt}" class="w-full h-auto rounded shadow-md object-cover mb-2" />`
+              : `<div id="loading-${creation.id}" class="w-full h-48 bg-gray-200 rounded flex items-center justify-center mb-2"><p class="text-gray-500">Loading image...</p></div>`
+            }
+            <p class="text-xs text-gray-500">${new Date(creation.created_at).toLocaleString()}</p>
+            ${hasImage ? `<a href="${creation.image_url}" download="monument-${creation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="info-window p-3 max-w-xs">
+          <div class="flex justify-between items-center mb-2">
+            <span class="text-sm font-semibold text-gray-700">
+              <span id="current-index">${currentIndex + 1}</span> of ${monuments.length} monuments here
+            </span>
+          </div>
+          <div id="carousel-container">
+            ${monumentsHtml}
+          </div>
+          <div class="flex justify-between mt-3">
+            <button id="prev-btn" class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
+              ← Previous
+            </button>
+            <button id="next-btn" class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
+              Next →
+            </button>
+          </div>
+        </div>
+      `;
+    }
+  }, []);
+
+  // Setup carousel controls with lazy loading
+  const setupCarouselControls = useCallback((monuments: Creation[], loadImage: (id: number) => Promise<string | null>) => {
+    if (monuments.length <= 1) return;
+
+    let currentIndex = 0;
+
+    const updateDisplay = async () => {
+      const slides = document.querySelectorAll('.monument-slide');
+      const indexDisplay = document.getElementById('current-index');
+      
+      slides.forEach((slide, index) => {
+        (slide as HTMLElement).style.display = index === currentIndex ? 'block' : 'none';
+      });
+      
+      if (indexDisplay) {
+        indexDisplay.textContent = String(currentIndex + 1);
+      }
+
+      // Load image for current slide if not loaded
+      const currentSlide = slides[currentIndex] as HTMLElement;
+      const monumentId = parseInt(currentSlide.dataset.monumentId || '0');
+      const monument = monuments.find(m => m.id === monumentId);
+      
+      if (monument && !monument.image_url && monumentId) {
+        console.log(`Loading image for monument ${monumentId} in carousel...`);
+        const imageUrl = await loadImage(monumentId);
+        
+        if (imageUrl) {
+          const loadingDiv = document.getElementById(`loading-${monumentId}`);
+          if (loadingDiv) {
+            loadingDiv.outerHTML = `
+              <div>
+                <img src="${imageUrl}" alt="${monument.monument_prompt}" class="w-full h-auto rounded shadow-md object-cover mb-2" />
+                <a href="${imageUrl}" download="monument-${monumentId}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>
+              </div>
+            `;
+          }
+        }
+      }
+    };
+
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+
+    if (prevBtn) {
+      prevBtn.onclick = (e) => {
+        e.stopPropagation();
+        currentIndex = (currentIndex - 1 + monuments.length) % monuments.length;
+        updateDisplay();
+      };
+    }
+
+    if (nextBtn) {
+      nextBtn.onclick = (e) => {
+        e.stopPropagation();
+        currentIndex = (currentIndex + 1) % monuments.length;
+        updateDisplay();
+      };
+    }
+
+    // Load first image
+    updateDisplay();
+  }, []);
+
+  // Effect to load Google Maps script
   useEffect(() => {
-    console.log("MapPage (render): GOOGLE_MAPS_API_KEY:", GOOGLE_MAPS_API_KEY ? "Present" : "Missing");
-    console.log("MapPage: useEffect for Google Maps script load. Status:", getGoogleMapsScriptStatus());
+    console.log("MapPage: GOOGLE_MAPS_API_KEY:", GOOGLE_MAPS_API_KEY ? "Present" : "Missing");
     
     const currentStatus = getGoogleMapsScriptStatus();
     
-    // If already loaded successfully, just update local state
     if (currentStatus === APIStatus.SUCCESS) {
-      console.log("MapPage: Google Maps already loaded, updating state");
+      console.log("MapPage: Google Maps already loaded");
       setMapLoadingStatus(APIStatus.SUCCESS);
       return;
     }
     
-    // Only attempt to load if not already loading or loaded, and API Key is present
     if (currentStatus === APIStatus.IDLE || currentStatus === APIStatus.ERROR) {
       if (!GOOGLE_MAPS_API_KEY) {
         setMapLoadingStatus(APIStatus.ERROR);
-        setError("Google Maps API Key is missing. Please set 'GOOGLE_MAPS_API_KEY' environment variable.");
-        console.error("MapPage: GOOGLE_MAPS_API_KEY is not defined.");
+        setError("Google Maps API Key is missing.");
         return;
       }
 
@@ -128,231 +214,130 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
       loadGoogleMapsScript(GOOGLE_MAPS_API_KEY)
         .then(() => {
           setMapLoadingStatus(APIStatus.SUCCESS);
-          setError(null); // Clear map-related errors if successful
-          console.log("MapPage: Google Maps script loaded successfully.");
+          setError(null);
         })
         .catch((err) => {
           setMapLoadingStatus(APIStatus.ERROR);
           setError(`Map script failed to load: ${err.message}`);
-          console.error('MapPage: Map script load error:', err);
         });
     }
-  }, [GOOGLE_MAPS_API_KEY]); // Dependency on API key to re-trigger if it changes
+  }, [GOOGLE_MAPS_API_KEY]);
 
-  // Effect to fetch creations data
+  // Effect to fetch creations
   useEffect(() => {
-    console.log("MapPage: useEffect for fetching creations data.");
     setDataLoadingStatus(APIStatus.LOADING);
     getCreations()
       .then((data) => {
         setCreations(data);
         setDataLoadingStatus(APIStatus.SUCCESS);
-        setError(null); // Clear data-related errors if successful
-        console.log("MapPage: Creations data fetched successfully:", data);
+        console.log("MapPage: Loaded", data.length, "monuments");
       })
       .catch((err) => {
         setDataLoadingStatus(APIStatus.ERROR);
-        setError(`Failed to load monuments: ${err instanceof Error ? err.message : String(err)}`);
-        console.error('MapPage: Fetch creations error:', err);
+        setError(`Failed to load monuments: ${err.message}`);
       });
-  }, []); // Run only once on mount to fetch all creations
+  }, []);
 
-  // Effect to initialize map and place markers once both map script and data are ready
+  // Effect to initialize map and markers
   useEffect(() => {
-    console.log("MapPage: useEffect for map init/marker placement. Map status:", mapLoadingStatus, "Data status:", dataLoadingStatus, "MapRef:", mapRef.current);
-    
-    // Only proceed if map script and data are loaded successfully, and mapRef is attached to a DOM element
     if (mapLoadingStatus === APIStatus.SUCCESS && dataLoadingStatus === APIStatus.SUCCESS && mapRef.current) {
       if (!window.google || !window.google.maps) {
-        setError("Google Maps API object not found after script load.");
-        setMapLoadingStatus(APIStatus.ERROR);
-        console.error("MapPage: window.google.maps not found after SUCCESS status.");
+        setError("Google Maps not available");
         return;
       }
-      console.log("MapPage: window.google.maps is available.");
 
-      // Initialize the map if it hasn't been already
+      // Initialize map
       if (!mapInstanceRef.current) {
-        const defaultLatLng = { lat: 0, lng: 0 }; // Default to center of the world
         mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
-          center: defaultLatLng,
-          zoom: 2, // World view zoom
-          minZoom: 2, // Prevent zooming out too far
-          maxZoom: 18, // Prevent zooming in too close
-          streetViewControl: false,
-          mapTypeControl: false,
-          fullscreenControl: false,
+          center: { lat: 0, lng: 0 },
+          zoom: 2,
+          minZoom: 2,
+          maxZoom: 18,
         });
 
         infoWindowRef.current = new window.google.maps.InfoWindow({
-          disableAutoPan: false, // Allow panning to show the window
-          maxWidth: 300
-        }); // Initialize info window
-        console.log("MapPage: Google Map instance initialized.");
-      } else {
-        console.log("MapPage: Google Map instance already exists.");
+          maxWidth: 350
+        });
       }
 
-      // Fix: Clear all existing markers before adding new ones
-      if (markersRef.current.length > 0) {
-        markersRef.current.forEach((marker) => marker.setMap(null));
-        markersRef.current = []; // Clear the array
-        console.log("MapPage: Cleared existing markers. Count:", markersRef.current.length);
-      } else {
-        console.log("MapPage: No existing markers to clear.");
-      }
+      // Clear existing markers
+      markersRef.current.forEach(marker => marker.setMap(null));
+      markersRef.current = [];
 
+      // Group and create markers
+      const groupedMonuments = groupMonumentsByLocation(creations);
       const bounds = new window.google.maps.LatLngBounds();
       let hasValidCoords = false;
-      let validCreations = 0;
-      let allValidCoordsAreNullIsland = true; // Track if all valid coords are 0,0
 
-      creations.forEach(creation => {
-        // Ensure creation has valid latitude and longitude numbers
-        if (typeof creation.latitude === 'number' && typeof creation.longitude === 'number' && mapInstanceRef.current) {
+      groupedMonuments.forEach((monuments, locationKey) => {
+        const firstMonument = monuments[0];
+        
+        if (typeof firstMonument.latitude === 'number' && typeof firstMonument.longitude === 'number' && mapInstanceRef.current) {
           hasValidCoords = true;
-          validCreations++;
-          const position = { lat: creation.latitude, lng: creation.longitude };
-
-          if (position.lat !== 0 || position.lng !== 0) {
-            allValidCoordsAreNullIsland = false; // Found a non-Null Island coordinate
-          }
+          const position = { lat: firstMonument.latitude, lng: firstMonument.longitude };
           
-          console.log(`MapPage: Attempting to place marker for "${creation.monument_prompt}" at Lat: ${position.lat}, Lng: ${position.lng}`);
+          const label = monuments.length > 1 ? {
+            text: String(monuments.length),
+            color: 'white',
+            fontSize: '14px',
+            fontWeight: 'bold'
+          } : undefined;
 
           const marker = new window.google.maps.Marker({
-            position: position,
-            map: mapInstanceRef.current, // Assign marker to the map instance
-            title: creation.monument_prompt,
-            animation: window.google.maps.Animation.DROP, // Drop animation on load
+            position,
+            map: mapInstanceRef.current,
+            title: monuments.length > 1 ? `${monuments.length} monuments` : firstMonument.monument_prompt,
+            label,
           });
 
-          // Store marker reference for potential clearing later
           markersRef.current.push(marker);
 
-          // Add click listener to show info window
+          // Click handler with lazy loading
           marker.addListener('click', async () => {
             if (!infoWindowRef.current || !mapInstanceRef.current) return;
             
-            // Find the current creation from state (might have image cached)
-            const currentCreation = creations.find(c => c.id === creation.id) || creation;
-            const loadingContainerId = `loading-${currentCreation.id}`;
+            // Get fresh data from state
+            const freshMonuments = monuments.map(m => 
+              creations.find(c => c.id === m.id) || m
+            );
             
-            console.log("MapPage: Marker clicked for monument ID:", currentCreation.id, "Has image?", !!currentCreation.image_url);
+            infoWindowRef.current.setContent(createMarkerContent(freshMonuments, 0));
+            infoWindowRef.current.open(mapInstanceRef.current, marker);
             
-            const map = mapInstanceRef.current;
-            const infoWindow = infoWindowRef.current;
-            
-            // Show current content (might have image if cached)
-            infoWindow.setContent(createMarkerContent(currentCreation, loadingContainerId));
-            infoWindow.open(map, marker);
-            
-            // If image not loaded yet, fetch it
-            if (!currentCreation.image_url && currentCreation.id) {
-              console.log(`MapPage: Fetching image for monument ${currentCreation.id}...`);
-              
-              // Keep window open during loading by preventing close
-              let isLoading = true;
-              const preventClose = () => {
-                if (isLoading) {
-                  setTimeout(() => {
-                    if (isLoading && infoWindow.getMap()) {
-                      // Window is still supposed to be loading, keep it visible
-                      console.log("MapPage: Keeping window open during image load");
-                    }
-                  }, 100);
-                }
-              };
-              
-              preventClose();
-              
-              const imageUrl = await loadMonumentImage(currentCreation.id);
-              isLoading = false; // Done loading
-              
-              if (imageUrl) {
-                console.log(`MapPage: Image loaded for monument ${currentCreation.id}, updating DOM`);
-                
-                // Wait a bit to ensure DOM is ready
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
-                // Try to update the DOM directly instead of replacing content
-                const loadingDiv = document.getElementById(loadingContainerId);
-                if (loadingDiv) {
-                  console.log(`MapPage: Found loading div ${loadingContainerId}, replacing with image`);
-                  
-                  // Replace the loading div with the actual image
-                  loadingDiv.outerHTML = `
-                    <div>
-                      <img src="${imageUrl}" alt="${currentCreation.monument_prompt}" class="w-48 h-auto rounded shadow-md object-cover" />
-                      <a href="${imageUrl}" download="monument-${currentCreation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>
-                    </div>
-                  `;
-                  console.log(`MapPage: DOM updated successfully for monument ${currentCreation.id}`);
-                } else {
-                  console.log(`MapPage: Loading container ${loadingContainerId} not found, trying to reopen window`);
-                  
-                  // If div not found, reopen the window with the image
-                  const withImage = { ...currentCreation, image_url: imageUrl };
-                  infoWindow.setContent(createMarkerContent(withImage));
-                  infoWindow.open(map, marker);
-                  console.log(`MapPage: Reopened window with image for monument ${currentCreation.id}`);
-                }
-              }
-            }
+            // Setup carousel (handles lazy loading internally)
+            setTimeout(() => setupCarouselControls(freshMonuments, loadMonumentImage), 100);
           });
-          bounds.extend(position); // Extend bounds to include this marker
-          console.log(`MapPage: Marker for "${creation.monument_prompt}" placed.`);
-        } else {
-          console.warn(`MapPage: Skipping marker for creation ID ${creation.id} due to invalid coordinates.`);
+
+          bounds.extend(position);
         }
       });
-      console.log(`MapPage: Finished processing ${creations.length} creations. Placed ${validCreations} markers.`);
 
-      // Adjust map bounds to fit all markers if there are any valid coordinates
+      // Adjust view
       if (hasValidCoords && mapInstanceRef.current) {
-        if (allValidCoordsAreNullIsland && validCreations > 0) {
-          // If all valid points are at 0,0, set a reasonable default zoom to make them visible
-          mapInstanceRef.current.setCenter({ lat: 0, lng: 0 });
-          mapInstanceRef.current.setZoom(8); // Zoom level to see Null Island clearly
-          console.log("MapPage: All valid markers at Null Island, setting center to 0,0 and zoom to 8.");
-        } else {
-          mapInstanceRef.current.fitBounds(bounds);
-          // Prevent excessive zoom if all markers are very close
-          if (mapInstanceRef.current.getZoom() > 15) {
-            mapInstanceRef.current.setZoom(15);
-            console.log("MapPage: Adjusted zoom to prevent excessive close-up (over 15).");
-          }
-        }
-      } else if (mapInstanceRef.current) {
-        // If no valid coords, revert to default world view
-        mapInstanceRef.current.setCenter({ lat: 0, lng: 0 });
-        mapInstanceRef.current.setZoom(2);
-        console.log("MapPage: No valid coordinates found, setting to default world view (zoom 2).");
+        mapInstanceRef.current.fitBounds(bounds);
+        const zoom = mapInstanceRef.current.getZoom();
+        if (zoom && zoom > 15) mapInstanceRef.current.setZoom(15);
       }
     }
-  }, [mapLoadingStatus, dataLoadingStatus, creations, createMarkerContent, loadMonumentImage]); // Re-run if any of these states change
+  }, [mapLoadingStatus, dataLoadingStatus, creations, createMarkerContent, setupCarouselControls, loadMonumentImage, groupMonumentsByLocation]);
 
-  // Determine overall loading and error states for the UI
   const isLoading = mapLoadingStatus === APIStatus.LOADING || dataLoadingStatus === APIStatus.LOADING;
   const hasError = mapLoadingStatus === APIStatus.ERROR || dataLoadingStatus === APIStatus.ERROR || error;
 
   return (
     <div className="relative w-full h-screen flex flex-col">
-      {/* Header and Create Monument button */}
       <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-white bg-opacity-90 shadow-md flex justify-between items-center">
         <h1 className="text-2xl md:text-3xl font-extrabold text-[#1a73e8]">
-          Monument Map
+          Monument Map {creations.length > 0 && `(${creations.length} monuments)`}
         </h1>
         <button
           onClick={onNavigateToCreate}
-          className="py-2 px-4 bg-[#4285F4] text-white font-bold rounded-lg shadow-lg hover:bg-[#346dc9] focus:outline-none focus:ring-4 focus:ring-[#a0c3ff] transition-all duration-300 transform active:scale-98 disabled:opacity-50"
-          aria-label="Create a new monument"
+          className="py-2 px-4 bg-[#4285F4] text-white font-bold rounded-lg shadow-lg hover:bg-[#346dc9] focus:outline-none focus:ring-4 focus:ring-[#a0c3ff] transition-all duration-300 transform active:scale-98"
         >
           Create Monument
         </button>
       </div>
 
-      {/* Map Container */}
       <div ref={mapRef} className="flex-grow w-full h-full bg-gray-200">
         {(isLoading || hasError) && (
           <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-60 z-20">
@@ -363,20 +348,10 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  <p className="text-xl">Loading map and monuments...</p>
+                  <p className="text-xl">Loading map...</p>
                 </>
               )}
-              {hasError && (
-                <>
-                  <p className="text-xl font-bold mb-2">Failed to Load Map or Data</p>
-                  {renderError(error || "An unknown error occurred.")}
-                  {!GOOGLE_MAPS_API_KEY && ( // Specific warning if API key is missing
-                    <p className="mt-4 text-orange-300">
-                      **Warning:** Google Maps API Key is missing. Please set `GOOGLE_MAPS_API_KEY` environment variable.
-                    </p>
-                  )}
-                </>
-              )}
+              {hasError && <>{renderError(error)}</>}
             </div>
           </div>
         )}
