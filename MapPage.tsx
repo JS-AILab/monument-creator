@@ -184,7 +184,10 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
           fullscreenControl: false,
         });
 
-        infoWindowRef.current = new window.google.maps.InfoWindow(); // Initialize info window
+        infoWindowRef.current = new window.google.maps.InfoWindow({
+          disableAutoPan: false, // Allow panning to show the window
+          maxWidth: 300
+        }); // Initialize info window
         console.log("MapPage: Google Map instance initialized.");
       } else {
         console.log("MapPage: Google Map instance already exists.");
@@ -248,14 +251,35 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
             if (!currentCreation.image_url && currentCreation.id) {
               console.log(`MapPage: Fetching image for monument ${currentCreation.id}...`);
               
+              // Keep window open during loading by preventing close
+              let isLoading = true;
+              const preventClose = () => {
+                if (isLoading) {
+                  setTimeout(() => {
+                    if (isLoading && infoWindow.getMap()) {
+                      // Window is still supposed to be loading, keep it visible
+                      console.log("MapPage: Keeping window open during image load");
+                    }
+                  }, 100);
+                }
+              };
+              
+              preventClose();
+              
               const imageUrl = await loadMonumentImage(currentCreation.id);
+              isLoading = false; // Done loading
               
               if (imageUrl) {
                 console.log(`MapPage: Image loaded for monument ${currentCreation.id}, updating DOM`);
                 
+                // Wait a bit to ensure DOM is ready
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
                 // Try to update the DOM directly instead of replacing content
                 const loadingDiv = document.getElementById(loadingContainerId);
                 if (loadingDiv) {
+                  console.log(`MapPage: Found loading div ${loadingContainerId}, replacing with image`);
+                  
                   // Replace the loading div with the actual image
                   loadingDiv.outerHTML = `
                     <div>
@@ -265,7 +289,13 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
                   `;
                   console.log(`MapPage: DOM updated successfully for monument ${currentCreation.id}`);
                 } else {
-                  console.log(`MapPage: Loading container not found, window may have been closed`);
+                  console.log(`MapPage: Loading container ${loadingContainerId} not found, trying to reopen window`);
+                  
+                  // If div not found, reopen the window with the image
+                  const withImage = { ...currentCreation, image_url: imageUrl };
+                  infoWindow.setContent(createMarkerContent(withImage));
+                  infoWindow.open(map, marker);
+                  console.log(`MapPage: Reopened window with image for monument ${currentCreation.id}`);
                 }
               }
             }
