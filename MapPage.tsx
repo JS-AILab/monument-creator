@@ -38,7 +38,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
   };
 
   // Memoized function to create marker content for the InfoWindow
-  const createMarkerContent = useCallback((creation: Creation) => {
+  const createMarkerContent = useCallback((creation: Creation, loadingId?: string) => {
     // Check if image is already loaded
     if (creation.image_url) {
       return `
@@ -51,12 +51,13 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
         </div>
       `;
     } else {
-      // Image not loaded yet - show loading state
+      // Image not loaded yet - show loading state with unique ID
+      const uniqueId = loadingId || `loading-${creation.id}`;
       return `
         <div class="info-window p-2">
           <h3 class="font-bold text-md mb-1">${creation.monument_prompt}</h3>
           <p class="text-sm text-gray-700 mb-2">in "${creation.scene_prompt}"</p>
-          <div class="w-48 h-32 bg-gray-200 rounded flex items-center justify-center">
+          <div id="${uniqueId}" class="w-48 h-32 bg-gray-200 rounded flex items-center justify-center">
             <p class="text-gray-500 text-sm">Loading image...</p>
           </div>
           <p class="text-xs text-gray-500 mt-2">${new Date(creation.created_at).toLocaleString()}</p>
@@ -232,6 +233,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
             
             // Find the current creation from state (might have image cached)
             const currentCreation = creations.find(c => c.id === creation.id) || creation;
+            const loadingContainerId = `loading-${currentCreation.id}`;
             
             console.log("MapPage: Marker clicked for monument ID:", currentCreation.id, "Has image?", !!currentCreation.image_url);
             
@@ -239,7 +241,7 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
             const infoWindow = infoWindowRef.current;
             
             // Show current content (might have image if cached)
-            infoWindow.setContent(createMarkerContent(currentCreation));
+            infoWindow.setContent(createMarkerContent(currentCreation, loadingContainerId));
             infoWindow.open(map, marker);
             
             // If image not loaded yet, fetch it
@@ -249,12 +251,22 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
               const imageUrl = await loadMonumentImage(currentCreation.id);
               
               if (imageUrl) {
-                // Create updated creation object with image
-                const withImage = { ...currentCreation, image_url: imageUrl };
+                console.log(`MapPage: Image loaded for monument ${currentCreation.id}, updating DOM`);
                 
-                // Update the info window content
-                infoWindow.setContent(createMarkerContent(withImage));
-                console.log(`MapPage: Image loaded for monument ${currentCreation.id}`);
+                // Try to update the DOM directly instead of replacing content
+                const loadingDiv = document.getElementById(loadingContainerId);
+                if (loadingDiv) {
+                  // Replace the loading div with the actual image
+                  loadingDiv.outerHTML = `
+                    <div>
+                      <img src="${imageUrl}" alt="${currentCreation.monument_prompt}" class="w-48 h-auto rounded shadow-md object-cover" />
+                      <a href="${imageUrl}" download="monument-${currentCreation.id}.png" class="block text-center text-blue-600 hover:text-blue-800 text-sm mt-2">Download Full Image</a>
+                    </div>
+                  `;
+                  console.log(`MapPage: DOM updated successfully for monument ${currentCreation.id}`);
+                } else {
+                  console.log(`MapPage: Loading container not found, window may have been closed`);
+                }
               }
             }
           });
