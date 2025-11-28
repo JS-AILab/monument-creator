@@ -227,37 +227,34 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
           markersRef.current.push(marker);
 
           // Add click listener to show info window
-          const currentCreation = creation; // Capture in closure
           marker.addListener('click', async () => {
-            if (infoWindowRef.current && mapInstanceRef.current) {
-              console.log("MapPage: Marker clicked for monument ID:", currentCreation.id);
+            if (!infoWindowRef.current || !mapInstanceRef.current) return;
+            
+            // Find the current creation from state (might have image cached)
+            const currentCreation = creations.find(c => c.id === creation.id) || creation;
+            
+            console.log("MapPage: Marker clicked for monument ID:", currentCreation.id, "Has image?", !!currentCreation.image_url);
+            
+            const map = mapInstanceRef.current;
+            const infoWindow = infoWindowRef.current;
+            
+            // Show current content (might have image if cached)
+            infoWindow.setContent(createMarkerContent(currentCreation));
+            infoWindow.open(map, marker);
+            
+            // If image not loaded yet, fetch it
+            if (!currentCreation.image_url && currentCreation.id) {
+              console.log(`MapPage: Fetching image for monument ${currentCreation.id}...`);
               
-              const map = mapInstanceRef.current;
-              const infoWindow = infoWindowRef.current;
+              const imageUrl = await loadMonumentImage(currentCreation.id);
               
-              // Show initial content (with or without image)
-              infoWindow.setContent(createMarkerContent(currentCreation));
-              infoWindow.open(map, marker);
-              console.log("MapPage: Info window opened for marker.");
-              
-              // If image not loaded yet, fetch it
-              if (!currentCreation.image_url && currentCreation.id) {
-                console.log(`MapPage: Loading image for monument ${currentCreation.id}`);
-                const imageUrl = await loadMonumentImage(currentCreation.id);
+              if (imageUrl) {
+                // Create updated creation object with image
+                const withImage = { ...currentCreation, image_url: imageUrl };
                 
-                // Update info window with loaded image IMMEDIATELY after fetch completes
-                if (imageUrl && infoWindow) {
-                  const updatedCreation = { ...currentCreation, image_url: imageUrl };
-                  
-                  // Check if this info window is still open before updating
-                  // (user might have closed it or clicked another marker)
-                  if (infoWindow.getMap()) {
-                    infoWindow.setContent(createMarkerContent(updatedCreation));
-                    console.log(`MapPage: Image loaded and info window updated for monument ${currentCreation.id}`);
-                  } else {
-                    console.log(`MapPage: Info window was closed, skipping update`);
-                  }
-                }
+                // Update the info window content
+                infoWindow.setContent(createMarkerContent(withImage));
+                console.log(`MapPage: Image loaded for monument ${currentCreation.id}`);
               }
             }
           });
