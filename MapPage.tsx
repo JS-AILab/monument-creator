@@ -119,7 +119,18 @@ const MapPage: React.FC<MapPageProps> = ({ onNavigateToCreate }) => {
         center: { lat: 0, lng: 0 },
         zoom: 2,
       });
-      infoWindowRef.current = new window.google.maps.InfoWindow();
+      
+      // Create InfoWindow with closeclick enabled (default)
+      infoWindowRef.current = new window.google.maps.InfoWindow({
+        maxWidth: 320,
+      });
+      
+      // Close info window when clicking on the map (outside the window)
+      mapInstanceRef.current.addListener('click', () => {
+        if (infoWindowRef.current) {
+          infoWindowRef.current.close();
+        }
+      });
     }
 
     // Clear old markers
